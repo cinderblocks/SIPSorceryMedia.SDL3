@@ -187,12 +187,12 @@ namespace SDL3
 		public const int RW_SEEK_CUR = 1;
 		public const int RW_SEEK_END = 2;
 
-		public const UInt32 SDL_RWOPS_UNKNOWN = 0; /* Unknown stream type */
-		public const UInt32 SDL_RWOPS_WINFILE = 1; /* Win32 file */
-		public const UInt32 SDL_RWOPS_STDFILE = 2; /* Stdio file */
-		public const UInt32 SDL_RWOPS_JNIFILE = 3; /* Android asset */
-		public const UInt32 SDL_RWOPS_MEMORY = 4; /* Memory stream */
-		public const UInt32 SDL_RWOPS_MEMORY_RO = 5; /* Read-Only memory stream */
+		public const uint SDL_RWOPS_UNKNOWN = 0; /* Unknown stream type */
+		public const uint SDL_RWOPS_WINFILE = 1; /* Win32 file */
+		public const uint SDL_RWOPS_STDFILE = 2; /* Stdio file */
+		public const uint SDL_RWOPS_JNIFILE = 3; /* Android asset */
+		public const uint SDL_RWOPS_MEMORY = 4; /* Memory stream */
+		public const uint SDL_RWOPS_MEMORY_RO = 5; /* Read-Only memory stream */
 
 		[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 		public delegate long SDLRWopsSizeCallback(IntPtr context);
@@ -335,22 +335,22 @@ namespace SDL3
 		public static extern byte SDL_ReadU8(IntPtr src);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt16 SDL_ReadLE16(IntPtr src);
+		public static extern ushort SDL_ReadLE16(IntPtr src);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt16 SDL_ReadBE16(IntPtr src);
+		public static extern ushort SDL_ReadBE16(IntPtr src);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_ReadLE32(IntPtr src);
+		public static extern uint SDL_ReadLE32(IntPtr src);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_ReadBE32(IntPtr src);
+		public static extern uint SDL_ReadBE32(IntPtr src);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt64 SDL_ReadLE64(IntPtr src);
+		public static extern ulong SDL_ReadLE64(IntPtr src);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt64 SDL_ReadBE64(IntPtr src);
+		public static extern ulong SDL_ReadBE64(IntPtr src);
 
 		/* Write endian functions */
 
@@ -358,22 +358,22 @@ namespace SDL3
 		public static extern uint SDL_WriteU8(IntPtr dst, byte value);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern uint SDL_WriteLE16(IntPtr dst, UInt16 value);
+		public static extern uint SDL_WriteLE16(IntPtr dst, ushort value);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern uint SDL_WriteBE16(IntPtr dst, UInt16 value);
+		public static extern uint SDL_WriteBE16(IntPtr dst, ushort value);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern uint SDL_WriteLE32(IntPtr dst, UInt32 value);
+		public static extern uint SDL_WriteLE32(IntPtr dst, uint value);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern uint SDL_WriteBE32(IntPtr dst, UInt32 value);
+		public static extern uint SDL_WriteBE32(IntPtr dst, uint value);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern uint SDL_WriteLE64(IntPtr dst, UInt64 value);
+		public static extern uint SDL_WriteLE64(IntPtr dst, ulong value);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern uint SDL_WriteBE64(IntPtr dst, UInt64 value);
+		public static extern uint SDL_WriteBE64(IntPtr dst, ulong value);
 
 		/* context refers to an SDL_RWops*
 		 * Only available in SDL 2.0.10 or higher.
@@ -5454,7 +5454,7 @@ namespace SDL3
 
 		/* Allocate a set of user-defined events */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_RegisterEvents(int numevents);
+		public static extern uint SDL_RegisterEvents(int numevents);
 		#endregion
 
 		#region SDL_scancode.h
@@ -6191,53 +6191,53 @@ namespace SDL3
 
 		/* Get the current state of the mouse */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetMouseState(out int x, out int y);
+		public static extern uint SDL_GetMouseState(out int x, out int y);
 
 		/* Get the current state of the mouse */
 		/* This overload allows for passing NULL to x */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetMouseState(IntPtr x, out int y);
+		public static extern uint SDL_GetMouseState(IntPtr x, out int y);
 
 		/* Get the current state of the mouse */
 		/* This overload allows for passing NULL to y */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetMouseState(out int x, IntPtr y);
+		public static extern uint SDL_GetMouseState(out int x, IntPtr y);
 
 		/* Get the current state of the mouse */
 		/* This overload allows for passing NULL to both x and y */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetMouseState(IntPtr x, IntPtr y);
+		public static extern uint SDL_GetMouseState(IntPtr x, IntPtr y);
 
 		/* Get the current state of the mouse, in relation to the desktop.
 		 * Only available in 2.0.4 or higher.
 		 */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetGlobalMouseState(out int x, out int y);
+		public static extern uint SDL_GetGlobalMouseState(out int x, out int y);
 
 		/* Get the current state of the mouse, in relation to the desktop.
 		 * Only available in 2.0.4 or higher.
 		 * This overload allows for passing NULL to x.
 		 */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetGlobalMouseState(IntPtr x, out int y);
+		public static extern uint SDL_GetGlobalMouseState(IntPtr x, out int y);
 
 		/* Get the current state of the mouse, in relation to the desktop.
 		 * Only available in 2.0.4 or higher.
 		 * This overload allows for passing NULL to y.
 		 */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetGlobalMouseState(out int x, IntPtr y);
+		public static extern uint SDL_GetGlobalMouseState(out int x, IntPtr y);
 
 		/* Get the current state of the mouse, in relation to the desktop.
 		 * Only available in 2.0.4 or higher.
 		 * This overload allows for passing NULL to both x and y
 		 */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetGlobalMouseState(IntPtr x, IntPtr y);
+		public static extern uint SDL_GetGlobalMouseState(IntPtr x, IntPtr y);
 
 		/* Get the mouse state with relative coords*/
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetRelativeMouseState(out int x, out int y);
+		public static extern uint SDL_GetRelativeMouseState(out int x, out int y);
 
 		/* Set the mouse cursor's position (within a window) */
 		/* window is an SDL_Window pointer */
@@ -6327,11 +6327,11 @@ namespace SDL3
 		public const uint SDL_BUTTON_RIGHT = 3;
 		public const uint SDL_BUTTON_X1 = 4;
 		public const uint SDL_BUTTON_X2 = 5;
-		public static readonly UInt32 SDL_BUTTON_LMASK = SDL_BUTTON(SDL_BUTTON_LEFT);
-		public static readonly UInt32 SDL_BUTTON_MMASK = SDL_BUTTON(SDL_BUTTON_MIDDLE);
-		public static readonly UInt32 SDL_BUTTON_RMASK = SDL_BUTTON(SDL_BUTTON_RIGHT);
-		public static readonly UInt32 SDL_BUTTON_X1MASK = SDL_BUTTON(SDL_BUTTON_X1);
-		public static readonly UInt32 SDL_BUTTON_X2MASK = SDL_BUTTON(SDL_BUTTON_X2);
+		public static readonly uint SDL_BUTTON_LMASK = SDL_BUTTON(SDL_BUTTON_LEFT);
+		public static readonly uint SDL_BUTTON_MMASK = SDL_BUTTON(SDL_BUTTON_MIDDLE);
+		public static readonly uint SDL_BUTTON_RMASK = SDL_BUTTON(SDL_BUTTON_RIGHT);
+		public static readonly uint SDL_BUTTON_X1MASK = SDL_BUTTON(SDL_BUTTON_X1);
+		public static readonly uint SDL_BUTTON_X2MASK = SDL_BUTTON(SDL_BUTTON_X2);
 
 		#endregion
 
@@ -6383,7 +6383,7 @@ namespace SDL3
 
 		/* Only available in 2.0.10 or higher. */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern SDL_TouchDeviceType SDL_GetTouchDeviceType(Int64 touchID);
+		public static extern SDL_TouchDeviceType SDL_GetTouchDeviceType(long touchID);
 
 		#endregion
 
@@ -6432,9 +6432,9 @@ namespace SDL3
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern int SDL_JoystickRumble(
 			IntPtr joystick,
-			UInt16 low_frequency_rumble,
-			UInt16 high_frequency_rumble,
-			UInt32 duration_ms
+			ushort low_frequency_rumble,
+			ushort high_frequency_rumble,
+			uint duration_ms
 		);
 
 		/* joystick refers to an SDL_Joystick*.
@@ -6443,9 +6443,9 @@ namespace SDL3
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern int SDL_JoystickRumbleTriggers(
 			IntPtr joystick,
-			UInt16 left_rumble,
-			UInt16 right_rumble,
-			UInt32 duration_ms
+			ushort left_rumble,
+			ushort right_rumble,
+			uint duration_ms
 		);
 
 		/* joystick refers to an SDL_Joystick* */
@@ -6689,7 +6689,7 @@ namespace SDL3
 		 */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern int SDL_JoystickAttachVirtual(
-			Int32 type,
+			int type,
 			int naxes,
 			int nbuttons,
 			int nhats
@@ -6710,7 +6710,7 @@ namespace SDL3
 		public static extern int SDL_JoystickSetVirtualAxis(
 			IntPtr joystick,
 			int axis,
-			Int16 value
+			short value
 		);
 
 		/* IntPtr refers to an SDL_Joystick*.
@@ -7182,9 +7182,9 @@ namespace SDL3
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern int SDL_GameControllerRumble(
 			IntPtr gamecontroller,
-			UInt16 low_frequency_rumble,
-			UInt16 high_frequency_rumble,
-			UInt32 duration_ms
+			ushort low_frequency_rumble,
+			ushort high_frequency_rumble,
+			uint duration_ms
 		);
 
 		/* gamecontroller refers to an SDL_GameController*.
@@ -7193,9 +7193,9 @@ namespace SDL3
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern int SDL_GameControllerRumbleTriggers(
 			IntPtr gamecontroller,
-			UInt16 left_rumble,
-			UInt16 right_rumble,
-			UInt32 duration_ms
+			ushort left_rumble,
+			ushort right_rumble,
+			uint duration_ms
 		);
 
 		/* gamecontroller refers to an SDL_GameController* */
@@ -7790,7 +7790,7 @@ namespace SDL3
 		public static extern int SDL_SensorGetDeviceNonPortableType(int device_index);
 
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern Int32 SDL_SensorGetDeviceInstanceID(int device_index);
+		public static extern int SDL_SensorGetDeviceInstanceID(int device_index);
 
 		/* IntPtr refers to an SDL_Sensor* */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
@@ -7799,7 +7799,7 @@ namespace SDL3
 		/* IntPtr refers to an SDL_Sensor* */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern IntPtr SDL_SensorFromInstanceID(
-			Int32 instance_id
+			int instance_id
 		);
 
 		/* sensor refers to an SDL_Sensor* */
@@ -7820,7 +7820,7 @@ namespace SDL3
 
 		/* sensor refers to an SDL_Sensor* */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern Int32 SDL_SensorGetInstanceID(IntPtr sensor);
+		public static extern int SDL_SensorGetInstanceID(IntPtr sensor);
 
 		/* sensor refers to an SDL_Sensor* */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
@@ -8169,7 +8169,7 @@ namespace SDL3
 		public static extern int SDL_QueueAudio(
 			uint dev,
 			IntPtr data,
-			UInt32 len
+			uint len
 		);
 
 		/* dev refers to an SDL_AudioDeviceID, data to a void*
@@ -8186,7 +8186,7 @@ namespace SDL3
 		 * Only available in 2.0.4 or higher.
 		 */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetQueuedAudioSize(uint dev);
+		public static extern uint SDL_GetQueuedAudioSize(uint dev);
 
 		/* dev refers to an SDL_AudioDeviceID
 		 * Only available in 2.0.4 or higher.
@@ -8265,41 +8265,41 @@ namespace SDL3
 		/* Compare tick values, return true if A has passed B. Introduced in SDL 2.0.1,
 		 * but does not require it (it was a macro).
 		 */
-		public static bool SDL_TICKS_PASSED(UInt32 A, UInt32 B)
+		public static bool SDL_TICKS_PASSED(uint A, uint B)
 		{
-			return ((Int32)(B - A) <= 0);
+			return ((int)(B - A) <= 0);
 		}
 
 		/* Delays the thread's processing based on the milliseconds parameter */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern void SDL_Delay(UInt32 ms);
+		public static extern void SDL_Delay(uint ms);
 
 		/* Returns the milliseconds that have passed since SDL was initialized */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt32 SDL_GetTicks();
+		public static extern uint SDL_GetTicks();
 
 		/* Returns the milliseconds that have passed since SDL was initialized
 		 * Only available in 2.0.18 or higher.
 		 */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt64 SDL_GetTicks64();
+		public static extern ulong SDL_GetTicks64();
 
 		/* Get the current value of the high resolution counter */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt64 SDL_GetPerformanceCounter();
+		public static extern ulong SDL_GetPerformanceCounter();
 
 		/* Get the count per second of the high resolution counter */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-		public static extern UInt64 SDL_GetPerformanceFrequency();
+		public static extern ulong SDL_GetPerformanceFrequency();
 
 		/* param refers to a void* */
 		[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-		public delegate UInt32 SDL_TimerCallback(UInt32 interval, IntPtr param);
+		public delegate uint SDL_TimerCallback(uint interval, IntPtr param);
 
 		/* int refers to an SDL_TimerID, param to a void* */
 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern int SDL_AddTimer(
-			UInt32 interval,
+			uint interval,
 			SDL_TimerCallback callback,
 			IntPtr param
 		);
@@ -8412,7 +8412,7 @@ namespace SDL3
 
 		/* Only available in 2.0.14 or higher. */
 		[DllImport(nativeLibName, EntryPoint = "SDL_AndroidRequestPermission", CallingConvention = CallingConvention.Cdecl)]
-		private static unsafe extern SDL_bool INTERNAL_SDL_AndroidRequestPermission(
+		private static extern unsafe SDL_bool INTERNAL_SDL_AndroidRequestPermission(
 			byte* permission
 		);
 		public static unsafe SDL_bool SDL_AndroidRequestPermission(
@@ -8429,7 +8429,7 @@ namespace SDL3
 
 		/* Only available in 2.0.16 or higher. */
 		[DllImport(nativeLibName, EntryPoint = "SDL_AndroidShowToast", CallingConvention = CallingConvention.Cdecl)]
-		private static unsafe extern int INTERNAL_SDL_AndroidShowToast(
+		private static extern unsafe int INTERNAL_SDL_AndroidShowToast(
 			byte* message,
 			int duration,
 			int gravity,
@@ -8783,7 +8783,7 @@ namespace SDL3
 
 		/* Only available in 2.0.14 or higher. */
 		[DllImport(nativeLibName, EntryPoint = "SDL_OpenURL", CallingConvention = CallingConvention.Cdecl)]
-		private static unsafe extern int INTERNAL_SDL_OpenURL(byte* url);
+		private static extern unsafe int INTERNAL_SDL_OpenURL(byte* url);
 		public static unsafe int SDL_OpenURL(string url)
 		{
 			byte* urlPtr = Utf8EncodeHeap(url);

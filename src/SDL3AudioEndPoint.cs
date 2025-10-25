@@ -31,7 +31,7 @@ namespace SIPSorceryMedia.SDL3
         private IAudioEncoder _audioEncoder;
         private MediaFormatManager<AudioFormat> _audioFormatManager;
 
-        private String _audioOutDeviceName;
+        private string _audioOutDeviceName;
         private uint _audioOutDeviceId = 0;
 
         protected bool _isStarted = false;
@@ -54,7 +54,7 @@ namespace SIPSorceryMedia.SDL3
             _audioOutDeviceName = audioOutDeviceName;
         }
 
-        private void RaiseAudioSinkError(String err)
+        private void RaiseAudioSinkError(string err)
         {
             CloseAudioSink();
             OnAudioSinkError?.Invoke(err);

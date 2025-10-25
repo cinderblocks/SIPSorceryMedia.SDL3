@@ -47,10 +47,10 @@ namespace SIPSorceryMedia.FFmpeg
         uint playbackDeviceId = 0;
 
         //String recordingDeviceNameToChoose = "External Mic";
-        String recordingDeviceNameToChoose = "Microphone (2";
+        string recordingDeviceNameToChoose = "Microphone (2";
 
         //String playbackDeviceNameToChoose = "Realtek HD Audio 2nd output";
-        String playbackDeviceNameToChoose = "Speakers (2";
+        string playbackDeviceNameToChoose = "Speakers (2";
 
         RecordingState currentState = RecordingState.STOPPED;
 
@@ -62,11 +62,11 @@ namespace SIPSorceryMedia.FFmpeg
             if (SDL_Init(SDL_INIT_AUDIO ) < 0)
                 throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
 
-            String ? recordingDeviceName = SDL3Helper.GetAudioRecordingDevice(recordingDeviceNameToChoose);
+            string ? recordingDeviceName = SDL3Helper.GetAudioRecordingDevice(recordingDeviceNameToChoose);
             if(recordingDeviceName == null)
                 throw new ApplicationException($"Recording device not found");
 
-            String? playbackDeviceName = SDL3Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
+            string? playbackDeviceName = SDL3Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
             if (playbackDeviceName == null)
                 throw new ApplicationException($"Playback device not found");
 
@@ -117,7 +117,7 @@ namespace SIPSorceryMedia.FFmpeg
             //Allocate and initialize byte buffer
             gRecordingBuffer = Enumerable.Repeat((byte)0, (int)gBufferByteSize).ToArray();
 
-            Boolean quit = false;
+            bool quit = false;
 
             currentState = RecordingState.STOPPED;
 
@@ -220,7 +220,7 @@ namespace SIPSorceryMedia.FFmpeg
 
         //if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER) < 0)
         //         {
-        //             throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
+        //             throw new ApplicationException($"Cannot initialize SDL for Audio purpose");
         //         }
 
 

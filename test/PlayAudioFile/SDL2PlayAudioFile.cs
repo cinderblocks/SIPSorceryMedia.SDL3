@@ -11,9 +11,9 @@ namespace SIPSorceryMedia.SDL3
         uint device;
 
         //String playbackDeviceNameToChoose = "Realtek HD Audio 2nd output";
-        String playbackDeviceNameToChoose = "Speakers (2";
+        string playbackDeviceNameToChoose = "Speakers (2";
 
-        String? playbackDeviceName;
+        string? playbackDeviceName;
 
 
         IntPtr audio_buffer;/* Pointer to wave data - uint8 */
@@ -48,7 +48,7 @@ namespace SIPSorceryMedia.SDL3
             //}
             //String currentAudioDriver = SDL_GetCurrentAudioDriver();
 
-            Boolean done = false;
+            bool done = false;
 
 
             SDL_FlushEvents(SDL_EventType.SDL_AUDIODEVICEADDED, SDL_EventType.SDL_AUDIODEVICEREMOVED);

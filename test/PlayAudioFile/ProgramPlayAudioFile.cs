@@ -8,7 +8,7 @@ namespace PlayAudioFile
     internal class Program
     {
         // Path to a valid audio WAV path
-        const String WAV_FILE_PATH = "./../../../../../media/file_example_WAV_5MG.wav";
+        const string WAV_FILE_PATH = "./../../../../../media/file_example_WAV_5MG.wav";
         //const String WAV_FILE_PATH = "./../../../../../media/file_example_WAV_1MG.wav";
 
         static IntPtr audio_buffer;/* Pointer to wave data - uint8 */
@@ -19,12 +19,12 @@ namespace PlayAudioFile
         static SDL_Event sdlEvent;
         static uint deviceId; // SDL Device Id
 
-        static Boolean end_audio_file = false;
+        static bool end_audio_file = false;
 
         static void Main(string[] args)
         {
             int deviceIndex = 0; // To store the index of the audio playback device selected
-            String deviceName; // To store the name of the audio playback device selected
+            string deviceName; // To store the name of the audio playback device selected
 
             Console.Clear();
             Console.WriteLine("\nTry to init SDL3 libraries - they must be stored in the same folder than this application");
@@ -35,7 +35,7 @@ namespace PlayAudioFile
             Console.WriteLine("\nInit done");
 
             // Get list of Audio Playback devices
-            List<String> sdlDevices = SIPSorceryMedia.SDL3.SDL3Helper.GetAudioPlaybackDevices();
+            List<string> sdlDevices = SIPSorceryMedia.SDL3.SDL3Helper.GetAudioPlaybackDevices();
 
             // Quit since no Audio playback found
             if( (sdlDevices == null) || (sdlDevices.Count == 0 ) )
@@ -53,7 +53,7 @@ namespace PlayAudioFile
                     
                     Console.WriteLine("\nSelect audio playback device:");
                     int index = 1;
-                    foreach (String device in sdlDevices)
+                    foreach (string device in sdlDevices)
                     {
                         Console.Write($"\n [{index}] - {device} ");
                         index++;
@@ -138,7 +138,7 @@ namespace PlayAudioFile
                 SDL_CloseAudioDevice(deviceId);
         }
 
-        static uint OpenAudioDevice(String deviceName)
+        static uint OpenAudioDevice(string deviceName)
         {
             /* Initialize fillerup() variables */
             deviceId = SDL_OpenAudioDevice(deviceName, SDL_FALSE, ref audio_spec, out SDL_AudioSpec obtainedeAudioSpec, 0);

@@ -27,7 +27,7 @@ namespace SIPSorceryMedia.SDL3
     {
         private static ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
 
-        private String _audioInDeviceName;
+        private string _audioInDeviceName;
         private uint _audioInDeviceId = 0;
 
         private IAudioEncoder _audioEncoder;
@@ -52,7 +52,7 @@ namespace SIPSorceryMedia.SDL3
 
 #endregion EVENT
 
-        public SDL3AudioSource(String audioInDeviceName, IAudioEncoder audioEncoder, uint frameSize = 1920)
+        public SDL3AudioSource(string audioInDeviceName, IAudioEncoder audioEncoder, uint frameSize = 1920)
         {
             if (audioEncoder == null)
                 throw new ApplicationException("Audio encoder provided is null");
@@ -69,7 +69,7 @@ namespace SIPSorceryMedia.SDL3
             backgroundWorker.WorkerSupportsCancellation = true;
         }
 
-        private void RaiseAudioSourceError(String err)
+        private void RaiseAudioSourceError(string err)
         {
             CloseAudio();
             OnAudioSourceError?.Invoke(err);

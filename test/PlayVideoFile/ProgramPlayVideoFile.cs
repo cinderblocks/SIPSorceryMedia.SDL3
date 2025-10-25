@@ -10,7 +10,7 @@ namespace PlayVideoFile
     internal class ProgramPlayVideoFile
     {
         // Path to a valid Video file
-        const String VIDEO_FILE_PATH = "./../../../../../media/big_buck_bunny.mp4";
+        const string VIDEO_FILE_PATH = "./../../../../../media/big_buck_bunny.mp4";
 
         // Path to FFmpeg library
         private const string FFMPEG_LIB_PATH = @"C:\ffmpeg-4.4.1-full_build-shared\bin"; // On Windows
@@ -23,7 +23,7 @@ namespace PlayVideoFile
         static void Main(string[] args)
         {
             int audioPlaybackDeviceIndex = 0; // To store the index of the audio playback device selected
-            String audioPlaybackDeviceName; // To store the name of the audio playback device selected
+            string audioPlaybackDeviceName; // To store the name of the audio playback device selected
 
             VideoCodecsEnum VideoCodec = VideoCodecsEnum.H264;
             IVideoSource videoSource;
@@ -45,7 +45,7 @@ namespace PlayVideoFile
             Console.WriteLine("\nInit done");
 
             // Get list of Audio Playback devices
-            List<String> sdlDevices = SIPSorceryMedia.SDL3.SDL3Helper.GetAudioPlaybackDevices();
+            List<string> sdlDevices = SIPSorceryMedia.SDL3.SDL3Helper.GetAudioPlaybackDevices();
 
             // Quit since no Audio playback found
             if ((sdlDevices == null) || (sdlDevices.Count == 0))
@@ -62,7 +62,7 @@ namespace PlayVideoFile
                 {
                     Console.WriteLine("\nSelect audio playback device:");
                     int index = 1;
-                    foreach (String device in sdlDevices)
+                    foreach (string device in sdlDevices)
                     {
                         Console.Write($"\n [{index}] - {device} ");
                         index++;

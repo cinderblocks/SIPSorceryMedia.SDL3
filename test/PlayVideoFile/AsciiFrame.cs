@@ -10,7 +10,7 @@ namespace PlayVideoFile
     {
         private VideoFrameConverter? grayConverter = null;
         private int nbLinesForFooter = 0;
-        private String footerText = "";
+        private string footerText = "";
 
         readonly StringBuilder asciiBuilder = new StringBuilder();
         readonly char[] asciiPixels = " `'.,-~:;<>\"^=+*!?|\\/(){}[]#&$@".ToCharArray();
@@ -20,7 +20,7 @@ namespace PlayVideoFile
             this.nbLinesForFooter = nbLinesForFooter;
         }
 
-        public void SetFooterText(String footerText)
+        public void SetFooterText(string footerText)
         {
             this.footerText = footerText;
         }
