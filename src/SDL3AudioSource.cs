@@ -25,7 +25,7 @@ namespace SIPSorceryMedia.SDL3
 {
     public class SDL3AudioSource: IAudioSource
     {
-        static private ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
+        private static ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
 
         private String _audioInDeviceName;
         private uint _audioInDeviceId = 0;
@@ -45,9 +45,10 @@ namespace SIPSorceryMedia.SDL3
 
 #region EVENT
 
-        public event EncodedSampleDelegate ? OnAudioSourceEncodedSample = null;
-        public event RawAudioSampleDelegate ? OnAudioSourceRawSample = null;
-        public event SourceErrorDelegate ? OnAudioSourceError = null;
+        public event EncodedSampleDelegate? OnAudioSourceEncodedSample = null;
+        public event RawAudioSampleDelegate? OnAudioSourceRawSample = null;
+        public event SourceErrorDelegate? OnAudioSourceError = null;
+        public event Action<EncodedAudioFrame>? OnAudioSourceEncodedFrameReady = null;
 
 #endregion EVENT
 
