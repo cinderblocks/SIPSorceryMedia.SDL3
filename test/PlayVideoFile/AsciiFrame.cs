@@ -2,7 +2,6 @@
 using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.FFmpeg;
 using System;
-using System.Collections.Generic;
 using System.Text;
 
 namespace PlayVideoFile

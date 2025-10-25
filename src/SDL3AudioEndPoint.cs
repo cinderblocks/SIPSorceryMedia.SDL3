@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------------
 // Filename: SDLAudioEnpoint.cs
 //
-// Description: Example of an AudioEnpoint using SDL2 to playback audio stream
+// Description: Example of an AudioEnpoint using SDL3 to playback audio stream
 //
 // Author(s):
 // Christophe Irles (christophe.irles@al-enterprise.com)
@@ -21,11 +21,11 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 
-namespace SIPSorceryMedia.SDL2
+namespace SIPSorceryMedia.SDL3
 {
-    public class SDL2AudioEndPoint : IAudioSink
+    public class SDL3AudioEndPoint : IAudioSink
     {
-        private ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL2AudioEndPoint>();
+        private ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioEndPoint>();
 
 
         private IAudioEncoder _audioEncoder;
@@ -46,7 +46,7 @@ namespace SIPSorceryMedia.SDL2
         /// <param name="audioEncoder">An audio encoder that can be used to encode and decode
         /// specific audio codecs.</param>
         /// <param name="audioOutDeviceName">String. Name of the audio playback to use.</param>
-        public SDL2AudioEndPoint(string audioOutDeviceName, IAudioEncoder audioEncoder)
+        public SDL3AudioEndPoint(string audioOutDeviceName, IAudioEncoder audioEncoder)
         {
             _audioFormatManager = new MediaFormatManager<AudioFormat>(audioEncoder.SupportedFormats);
             _audioEncoder = audioEncoder;
@@ -91,9 +91,9 @@ namespace SIPSorceryMedia.SDL2
 
                 // Init Playback device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
-                var audioSpec = SDL2Helper.GetAudioSpec(audioFormat.ClockRate, 1);
+                var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
 
-                _audioOutDeviceId = SDL2Helper.OpenAudioPlaybackDevice(_audioOutDeviceName, ref audioSpec);
+                _audioOutDeviceId = SDL3Helper.OpenAudioPlaybackDevice(_audioOutDeviceName, ref audioSpec);
                 if(_audioOutDeviceId > 0)
                     log.LogDebug($"[InitPlaybackDevice] Id:[{_audioOutDeviceId}] - DeviceName:[{_audioOutDeviceName}]");
                 else
@@ -118,12 +118,12 @@ namespace SIPSorceryMedia.SDL2
             if (_audioOutDeviceId > 0)
             {
                 // Check if device is not stopped
-                if (SDL2Helper.IsDeviceStopped(_audioOutDeviceId))
+                if (SDL3Helper.IsDeviceStopped(_audioOutDeviceId))
                 {
                     RaiseAudioSinkError($"SDLAudioSource [{_audioOutDeviceName}] stoppped.");
                     return;
                 }
-                SDL2Helper.QueueAudioPlaybackDevice(_audioOutDeviceId, ref pcmSample, (uint)pcmSample.Length);
+                SDL3Helper.QueueAudioPlaybackDevice(_audioOutDeviceId, ref pcmSample, (uint)pcmSample.Length);
             }
         }
 
@@ -142,7 +142,7 @@ namespace SIPSorceryMedia.SDL2
         {
             if (_isStarted && !_isPaused)
             {
-                SDL2Helper.PauseAudioPlaybackDevice(_audioOutDeviceId, true);
+                SDL3Helper.PauseAudioPlaybackDevice(_audioOutDeviceId, true);
                 _isPaused = true;
 
                 log.LogDebug($"[PauseAudioSink] Audio output - Id:[{_audioOutDeviceId}]");
@@ -155,7 +155,7 @@ namespace SIPSorceryMedia.SDL2
         {
             if (_isStarted && _isPaused)
             {
-                SDL2Helper.PauseAudioPlaybackDevice(_audioOutDeviceId, false);
+                SDL3Helper.PauseAudioPlaybackDevice(_audioOutDeviceId, false);
                 _isPaused = false;
 
                 log.LogDebug($"[ResumeAudioSink] Audio output - Id:[{_audioOutDeviceId}]");
@@ -186,7 +186,7 @@ namespace SIPSorceryMedia.SDL2
             if (_isStarted && (_audioOutDeviceId > 0))
             {
                 PauseAudioSink().Wait();
-                SDL2Helper.CloseAudioPlaybackDevice(_audioOutDeviceId);
+                SDL3Helper.CloseAudioPlaybackDevice(_audioOutDeviceId);
 
                 _isClosed = true;
                 _isStarted = false;

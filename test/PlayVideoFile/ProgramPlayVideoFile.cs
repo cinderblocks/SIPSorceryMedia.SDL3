@@ -1,11 +1,9 @@
-﻿using FFmpeg.AutoGen;
-using SIPSorceryMedia.Abstractions;
+﻿using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.FFmpeg;
-using SIPSorceryMedia.SDL2;
+using SIPSorceryMedia.SDL3;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 namespace PlayVideoFile
 {
@@ -20,7 +18,7 @@ namespace PlayVideoFile
         //private const string LIB_PATH = @"..\..\..\..\..\lib\x64";
 
         static AsciiFrame ? asciiFrame = null;
-        static SDL2AudioEndPoint ? audioEndPoint = null;
+        static SDL3AudioEndPoint ? audioEndPoint = null;
 
         static void Main(string[] args)
         {
@@ -41,19 +39,19 @@ namespace PlayVideoFile
 
 
             // Init SDL Library - Library files must be in the same folder than the application
-            Console.WriteLine("\nTry to init SDL2 libraries - they must be stored in the same folder than this application");
-            SDL2Helper.InitSDL();
+            Console.WriteLine("\nTry to init SDL3 libraries - they must be stored in the same folder than this application");
+            SDL3Helper.InitSDL();
 
             Console.WriteLine("\nInit done");
 
             // Get list of Audio Playback devices
-            List<String> sdlDevices = SIPSorceryMedia.SDL2.SDL2Helper.GetAudioPlaybackDevices();
+            List<String> sdlDevices = SIPSorceryMedia.SDL3.SDL3Helper.GetAudioPlaybackDevices();
 
             // Quit since no Audio playback found
             if ((sdlDevices == null) || (sdlDevices.Count == 0))
             {
                 Console.WriteLine("No Audio playback devices found ...");
-                SDL2Helper.QuitSDL();
+                SDL3Helper.QuitSDL();
                 return;
             }
 
@@ -89,7 +87,7 @@ namespace PlayVideoFile
             audioEncoder = new AudioEncoder();
 
             // Create audio end point: it will be used to play back tuhe audio from the video file
-            audioEndPoint = new SDL2AudioEndPoint(audioPlaybackDeviceName, audioEncoder);
+            audioEndPoint = new SDL3AudioEndPoint(audioPlaybackDeviceName, audioEncoder);
             audioEndPoint.SetAudioSinkFormat(new AudioFormat(SDPWellKnownMediaFormatsEnum.PCMU));
             audioEndPoint.StartAudioSink();
 
@@ -127,7 +125,7 @@ namespace PlayVideoFile
             videoSource.CloseVideo();
 
             // Quit SDL Library
-            SDL2Helper.QuitSDL();
+            SDL3Helper.QuitSDL();
         }
 
         private static void FileSource_OnAudioSourceRawSample(AudioSamplingRatesEnum samplingRate, uint durationMilliseconds, short[] sample)

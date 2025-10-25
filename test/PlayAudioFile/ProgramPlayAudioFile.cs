@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using SIPSorceryMedia.SDL2;
-using static SDL2.SDL;
+using SIPSorceryMedia.SDL3;
+using static SDL3.SDL;
 
 namespace PlayAudioFile
 {
@@ -27,21 +27,21 @@ namespace PlayAudioFile
             String deviceName; // To store the name of the audio playback device selected
 
             Console.Clear();
-            Console.WriteLine("\nTry to init SDL2 libraries - they must be stored in the same folder than this application");
+            Console.WriteLine("\nTry to init SDL3 libraries - they must be stored in the same folder than this application");
 
             // Init SDL Library - Library files must be in the same folder than the application
-            SDL2Helper.InitSDL();
+            SDL3Helper.InitSDL();
 
             Console.WriteLine("\nInit done");
 
             // Get list of Audio Playback devices
-            List<String> sdlDevices = SIPSorceryMedia.SDL2.SDL2Helper.GetAudioPlaybackDevices();
+            List<String> sdlDevices = SIPSorceryMedia.SDL3.SDL3Helper.GetAudioPlaybackDevices();
 
             // Quit since no Audio playback found
             if( (sdlDevices == null) || (sdlDevices.Count == 0 ) )
             {
                 Console.WriteLine("No Audio playbqck devices found ...");
-                SDL2Helper.QuitSDL();
+                SDL3Helper.QuitSDL();
                 return;
             }
 
@@ -78,7 +78,7 @@ namespace PlayAudioFile
             if (SDL_LoadWAV(WAV_FILE_PATH, out audio_spec, out audio_buffer, out audio_len) == null)
             {
                 Console.WriteLine("\nCannot open audio file - its format is not supported");
-                SDL2Helper.QuitSDL();
+                SDL3Helper.QuitSDL();
                 return;
             }
 
@@ -86,7 +86,7 @@ namespace PlayAudioFile
             if(audio_len == 0)
             {
                 Console.WriteLine("\nAudio file not found - path is incorrect");
-                SDL2Helper.QuitSDL();
+                SDL3Helper.QuitSDL();
                 return;
             }
 
@@ -99,7 +99,7 @@ namespace PlayAudioFile
             if(deviceId == 0)
             {
                 Console.WriteLine("\nCannot open Audio device ...");
-                SDL2Helper.QuitSDL();
+                SDL3Helper.QuitSDL();
                 return;
             }
 
@@ -129,7 +129,7 @@ namespace PlayAudioFile
             CloseAudioDevice(deviceId);
 
             // Quit SDL Library
-            SDL2Helper.QuitSDL();
+            SDL3Helper.QuitSDL();
         }
 
         static void CloseAudioDevice(uint deviceId)

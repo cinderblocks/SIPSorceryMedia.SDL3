@@ -1,15 +1,11 @@
-﻿using SIPSorceryMedia.SDL2;
+﻿using SIPSorceryMedia.SDL3;
 using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using static SDL2.SDL;
+using static SDL3.SDL;
 
 namespace SIPSorceryMedia.FFmpeg
 {
-    public unsafe class SDL2RecordThenPlayback
+    public unsafe class SDL3RecordThenPlayback
     {
         enum RecordingState
         {
@@ -59,18 +55,18 @@ namespace SIPSorceryMedia.FFmpeg
         RecordingState currentState = RecordingState.STOPPED;
 
 
-        public unsafe SDL2RecordThenPlayback()
+        public unsafe SDL3RecordThenPlayback()
         {
             SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
 
             if (SDL_Init(SDL_INIT_AUDIO ) < 0)
                 throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
 
-            String ? recordingDeviceName = SDL2Helper.GetAudioRecordingDevice(recordingDeviceNameToChoose);
+            String ? recordingDeviceName = SDL3Helper.GetAudioRecordingDevice(recordingDeviceNameToChoose);
             if(recordingDeviceName == null)
                 throw new ApplicationException($"Recording device not found");
 
-            String? playbackDeviceName = SDL2Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
+            String? playbackDeviceName = SDL3Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
             if (playbackDeviceName == null)
                 throw new ApplicationException($"Playback device not found");
 
@@ -110,7 +106,7 @@ namespace SIPSorceryMedia.FFmpeg
             int bytesPerSample = gReceivedRecordingSpec.channels * (SDL_AUDIO_BITSIZE(gReceivedRecordingSpec.format) / 8);
 
             //Calculate bytes per second
-            int bytesPerSecond = SDL2Helper.GetBytesPerSecond(gReceivedRecordingSpec);  //gReceivedRecordingSpec.freq * bytesPerSample;
+            int bytesPerSecond = SDL3Helper.GetBytesPerSecond(gReceivedRecordingSpec);  //gReceivedRecordingSpec.freq * bytesPerSample;
 
             //Calculate buffer size
             gBufferByteSize = (uint) (RECORDING_BUFFER_SECONDS * bytesPerSecond);
@@ -218,7 +214,7 @@ namespace SIPSorceryMedia.FFmpeg
         }
 
 
-        //public unsafe SDL2AudioPlayBack(String path)
+        //public unsafe SDL3AudioPlayBack(String path)
         //      {
         //SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
 

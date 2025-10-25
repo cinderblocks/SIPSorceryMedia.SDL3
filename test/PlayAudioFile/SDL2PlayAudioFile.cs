@@ -1,11 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using static SDL2.SDL;
+using static SDL3.SDL;
 
-namespace SIPSorceryMedia.SDL2
+namespace SIPSorceryMedia.SDL3
 {
-    public unsafe class SDL2PlayAudioFile
+    public unsafe class SDL3PlayAudioFile
     {
         SDL_AudioSpec audioSpec;
         SDL_Event sdlEvent;
@@ -22,7 +20,7 @@ namespace SIPSorceryMedia.SDL2
         uint audio_len;     /* Length of wave data * - uint32 */
         int audio_pos;      /* Current play position */
 
-        public unsafe SDL2PlayAudioFile(string path)
+        public unsafe SDL3PlayAudioFile(string path)
         {
             SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
 
@@ -113,7 +111,7 @@ namespace SIPSorceryMedia.SDL2
 
         void OpenAudio()
         {
-            playbackDeviceName = SDL2Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
+            playbackDeviceName = SDL3Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
 
             if(playbackDeviceName == null)
                 throw new ApplicationException($"Playback device not found");

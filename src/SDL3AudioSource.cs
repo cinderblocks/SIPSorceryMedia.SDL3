@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------------
 // Filename: SDLAudioEnpoint.cs
 //
-// Description: Example of an AudioEnpoint using SDL2 to playback audio stream
+// Description: Example of an AudioEnpoint using SDL3 to playback audio stream
 //
 // Author(s):
 // Christophe Irles (christophe.irles@al-enterprise.com)
@@ -19,14 +19,13 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
-namespace SIPSorceryMedia.SDL2
+namespace SIPSorceryMedia.SDL3
 {
-    public class SDL2AudioSource: IAudioSource
+    public class SDL3AudioSource: IAudioSource
     {
-        static private ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL2AudioSource>();
+        static private ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
 
         private String _audioInDeviceName;
         private uint _audioInDeviceId = 0;
@@ -52,7 +51,7 @@ namespace SIPSorceryMedia.SDL2
 
 #endregion EVENT
 
-        public SDL2AudioSource(String audioInDeviceName, IAudioEncoder audioEncoder, uint frameSize = 1920)
+        public SDL3AudioSource(String audioInDeviceName, IAudioEncoder audioEncoder, uint frameSize = 1920)
         {
             if (audioEncoder == null)
                 throw new ApplicationException("Audio encoder provided is null");
@@ -84,13 +83,13 @@ namespace SIPSorceryMedia.SDL2
                 do
                 {
                     // Check if device is not stopped
-                    if (SDL2Helper.IsDeviceStopped(_audioInDeviceId))
+                    if (SDL3Helper.IsDeviceStopped(_audioInDeviceId))
                     {
                         RaiseAudioSourceError($"SDLAudioSource [{_audioInDeviceName}] stoppped.");
                         return;
                     }
 
-                    size = SDL2Helper.GetQueuedAudioSize(_audioInDeviceId);
+                    size = SDL3Helper.GetQueuedAudioSize(_audioInDeviceId);
                     if (size >= ( frameSize * 2)) // Need to use double size since we get byte[] and not short[] from SDL
                     {
                         if (frameSize != 0)
@@ -102,7 +101,7 @@ namespace SIPSorceryMedia.SDL2
 
                         fixed (byte* ptr = &buf[0])
                         {
-                            SDL2Helper.DequeueAudio(_audioInDeviceId, (IntPtr)ptr, bufferSize);
+                            SDL3Helper.DequeueAudio(_audioInDeviceId, (IntPtr)ptr, bufferSize);
 
                             short[] pcm = buf.Take((int)bufferSize * 2).Where((x, i) => i % 2 == 0).Select((y, i) => BitConverter.ToInt16(buf, i * 2)).ToArray();
                             OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
@@ -119,7 +118,7 @@ namespace SIPSorceryMedia.SDL2
                     }
                 } while (size >= frameSize);
 
-                SDL2Helper.Delay(16);
+                SDL3Helper.Delay(16);
             }
         }
 
@@ -137,10 +136,10 @@ namespace SIPSorceryMedia.SDL2
                 else
                     audioSamplingRates = AudioSamplingRatesEnum.Rate8KHz;
 
-                var audioSpec = SDL2Helper.GetAudioSpec(audioFormat.ClockRate, 1, (ushort)frameSize);
-                //int bytesPerSecond = SDL2Helper.GetBytesPerSecond(audioSpec);
+                var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1, (ushort)frameSize);
+                //int bytesPerSecond = SDL3Helper.GetBytesPerSecond(audioSpec);
 
-                _audioInDeviceId = SDL2Helper.OpenAudioRecordingDevice(_audioInDeviceName, ref audioSpec);
+                _audioInDeviceId = SDL3Helper.OpenAudioRecordingDevice(_audioInDeviceName, ref audioSpec);
                 if (_audioInDeviceId > 0)
                     log.LogDebug($"[InitRecordingDevice] Audio source - Id:[{_audioInDeviceId}] - DeviceName:[{_audioInDeviceName}]");
                 else
@@ -164,7 +163,7 @@ namespace SIPSorceryMedia.SDL2
                     backgroundWorker.CancelAsync();
 
                 if(_audioInDeviceId > 0)
-                    SDL2Helper.PauseAudioRecordingDevice(_audioInDeviceId, true);
+                    SDL3Helper.PauseAudioRecordingDevice(_audioInDeviceId, true);
                 
                 _isPaused = true;
                 log.LogDebug($"[PauseAudio] Audio source - Id:[{_audioInDeviceId}]");
@@ -181,7 +180,7 @@ namespace SIPSorceryMedia.SDL2
                     backgroundWorker.RunWorkerAsync();
 
                 if (_audioInDeviceId > 0)
-                    SDL2Helper.PauseAudioRecordingDevice(_audioInDeviceId, false);
+                    SDL3Helper.PauseAudioRecordingDevice(_audioInDeviceId, false);
 
                 _isPaused = false;
                 log.LogDebug($"[ResumeAudio] Audio source - Id:[{_audioInDeviceId}]");
@@ -219,7 +218,7 @@ namespace SIPSorceryMedia.SDL2
                 PauseAudio().Wait();
                 if (_audioInDeviceId > 0)
                 {
-                    SDL2Helper.CloseAudioRecordingDevice(_audioInDeviceId);
+                    SDL3Helper.CloseAudioRecordingDevice(_audioInDeviceId);
                     log.LogDebug($"[CloseAudio] Audio source - Id:[{_audioInDeviceId}] - Namz:[{_audioInDeviceName}]");
                 }
             }

@@ -1,5 +1,5 @@
 ﻿#region License
-/* SDL2# - C# Wrapper for SDL2
+/* SDL3# - C# Wrapper for SDL3
  *
  * Copyright (c) 2013-2021 Ethan Lee.
  *
@@ -28,18 +28,17 @@
 
 #region Using Statements
 using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 #endregion
 
-namespace SDL2
+namespace SDL3
 {
 	public static class SDL
 	{
-		#region SDL2# Variables
+		#region SDL3 Variables
 
-		private const string nativeLibName = "SDL2";
+		private const string nativeLibName = "SDL3";
 
 
 		[DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory", SetLastError = false)]
@@ -4735,7 +4734,7 @@ namespace SDL2
 		public const byte SDL_PRESSED = 1;
 		public const byte SDL_RELEASED = 0;
 
-		/* Default size is according to SDL2 default. */
+		/* Default size is according to SDL3 default. */
 		public const int SDL_TEXTEDITINGEVENT_TEXT_SIZE = 32;
 		public const int SDL_TEXTINPUTEVENT_TEXT_SIZE = 32;
 
@@ -8260,7 +8259,7 @@ namespace SDL2
 		#region SDL_timer.h
 
 		/* System timers rely on different OS mechanisms depending on
-		 * which operating system SDL2 is compiled against.
+		 * which operating system SDL3 is compiled against.
 		 */
 
 		/* Compare tick values, return true if A has passed B. Introduced in SDL 2.0.1,

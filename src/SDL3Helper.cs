@@ -2,14 +2,14 @@
 using System;
 using System.Collections.Generic;
 
-using static SDL2.SDL;
+using static SDL3.SDL;
 
 
-namespace SIPSorceryMedia.SDL2
+namespace SIPSorceryMedia.SDL3
 {
-    public class SDL2Helper
+    public class SDL3Helper
     {
-        private static Boolean _sdl2Initialised = false;
+        private static Boolean _sdl3Initialised = false;
 
         static public Boolean IsDeviceStopped(uint deviceId) => (SDL_GetAudioDeviceStatus(deviceId) == SDL_AudioStatus.SDL_AUDIO_STOPPED);
 
@@ -80,23 +80,23 @@ namespace SIPSorceryMedia.SDL2
 
         static public void InitSDL(uint flags = SDL_INIT_AUDIO | SDL_INIT_TIMER)
         {
-            if (!_sdl2Initialised)
+            if (!_sdl3Initialised)
             {
                 //SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
 
                 if (SDL_Init(flags) < 0)
                     throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
 
-                _sdl2Initialised = true;
+                _sdl3Initialised = true;
             }
         }
 
         static public void QuitSDL()
         {
-            if (_sdl2Initialised)
+            if (_sdl3Initialised)
             {
                 SDL_Quit();
-                _sdl2Initialised = false;
+                _sdl3Initialised = false;
             }
         }
 
