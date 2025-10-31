@@ -12,8 +12,8 @@ namespace PlayVideoFile
         private int nbLinesForFooter = 0;
         private string footerText = "";
 
-        readonly StringBuilder asciiBuilder = new StringBuilder();
-        readonly char[] asciiPixels = " `'.,-~:;<>\"^=+*!?|\\/(){}[]#&$@".ToCharArray();
+        private readonly StringBuilder asciiBuilder = new StringBuilder();
+        private readonly char[] asciiPixels = " `'.,-~:;<>\"^=+*!?|\\/(){}[]#&$@".ToCharArray();
 
         public AsciiFrame(int nbLinesForFooter = 0)
         {

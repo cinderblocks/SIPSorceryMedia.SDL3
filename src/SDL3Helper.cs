@@ -1,4 +1,38 @@
-﻿using SIPSorceryMedia.Abstractions;
+﻿/**
+ * @file SDL3Helper.cs
+ * @brief Helper classes for SDL3
+ *
+ * Copyright 2025, Christophe Irles.
+ * Copyright 2025, Sjofn LLC.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * 3. Neither the name of the copyright holder nor the names of its
+ *    contributors may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+using SIPSorceryMedia.Abstractions;
 using System;
 using System.Collections.Generic;
 
@@ -11,33 +45,32 @@ namespace SIPSorceryMedia.SDL3
     {
         private static bool _sdl3Initialised = false;
 
-        public static bool IsDeviceStopped(uint deviceId) => (SDL_GetAudioDeviceStatus(deviceId) == SDL_AudioStatus.SDL_AUDIO_STOPPED);
+        public static bool PauseAudioStreamDevice(IntPtr stream) => SDL_PauseAudioStreamDevice(stream);
 
-        public static bool IsDevicePaused(uint deviceId) => (SDL_GetAudioDeviceStatus(deviceId) == SDL_AudioStatus.SDL_AUDIO_PAUSED);
+        public static bool ResumeAudioStreamDevice(IntPtr stream) => SDL_ResumeAudioStreamDevice(stream);
 
-        public static bool IsDevicePlaying(uint deviceId) => (SDL_GetAudioDeviceStatus(deviceId) == SDL_AudioStatus.SDL_AUDIO_PLAYING);
+        public static bool IsDevicePaused(uint deviceId) => (SDL_AudioDevicePaused(deviceId));
 
-        public static string ? GetAudioRecordingDevice(string startWithName) => GetAudioDevice(startWithName, true);
+        public static (uint id, string name)? GetAudioRecordingDevice(string startWithName) => GetAudioDevice(startWithName, true);
 
-        public static  string? GetAudioPlaybackDevice(string startWithName) => GetAudioDevice(startWithName, false);
+        public static (uint id, string name)? GetAudioPlaybackDevice(string startWithName) => GetAudioDevice(startWithName, false);
 
-        public static string? GetAudioRecordingDevice(int index) => GetAudioDevice(index, true);
+        public static (uint id, string name)? GetAudioRecordingDevice(int index) => GetAudioDevice(index, true);
 
-        public static string? GetAudioPlaybackDevice(int index) => GetAudioDevice(index, false);
+        public static (uint id, string name)? GetAudioPlaybackDevice(int index) => GetAudioDevice(index, false);
 
-        public static List<string> GetAudioPlaybackDevices() => GetAudioDevices(false);
+        public static Dictionary<uint, string> GetAudioPlaybackDevices() => GetAudioDevices(false);
 
-        public static List<string> GetAudioRecordingDevices() => GetAudioDevices(true);
+        public static Dictionary<uint, string> GetAudioRecordingDevices() => GetAudioDevices(true);
 
-        public static SDL_AudioSpec GetAudioSpec(int clockRate = AudioFormat.DEFAULT_CLOCK_RATE, byte channels = 1, ushort samples = 960)
+        public static SDL_AudioSpec GetAudioSpec(int clockRate = AudioFormat.DEFAULT_CLOCK_RATE, byte channels = 1)
         {
-            SDL_AudioSpec desiredPlaybackSpec = new SDL_AudioSpec();
-            desiredPlaybackSpec.freq = clockRate;
-            desiredPlaybackSpec.format = AUDIO_S16SYS;
-            desiredPlaybackSpec.channels = channels; // Value returned by (byte)ffmpeg.av_get_channel_layout_nb_channels(ffmpeg.AV_CH_LAYOUT_MONO);
-            desiredPlaybackSpec.silence = 0;
-            desiredPlaybackSpec.samples = samples;
-            //desiredPlaybackSpec.userdata = null;
+            SDL_AudioSpec desiredPlaybackSpec = new SDL_AudioSpec
+            {
+                freq = clockRate,
+                format = SDL_AudioFormat.SDL_AUDIO_S16,
+                channels = channels
+            };
 
             return desiredPlaybackSpec;
         }
@@ -45,7 +78,7 @@ namespace SIPSorceryMedia.SDL3
         public static int GetBytesPerSample(SDL_AudioSpec sdlAudioSpec)
         {
             //Calculate per sample bytes
-            return sdlAudioSpec.channels * (SDL_AUDIO_BITSIZE(sdlAudioSpec.format) / 8);
+            return sdlAudioSpec.channels * (SDL_AUDIO_BITSIZE((ushort)sdlAudioSpec.format) / 8);
         }
 
         public static int GetBytesPerSecond(SDL_AudioSpec sdlAudioSpec)
@@ -54,118 +87,110 @@ namespace SIPSorceryMedia.SDL3
             return sdlAudioSpec.freq * GetBytesPerSample(sdlAudioSpec);
         }
 
-        public static uint GetQueuedAudioSize(uint deviceID) => SDL_GetQueuedAudioSize(deviceID);
+        public static bool PutAudio(IntPtr stream, IntPtr ptr, int bufferSize) => SDL_PutAudioStreamData(stream, ptr, bufferSize);
 
-        public static uint DequeueAudio(uint deviceID, IntPtr ptr, uint bufferSize) => SDL_DequeueAudio(deviceID, ptr, bufferSize);
+        public static int GetAudioStreamQueued(IntPtr stream) => SDL_GetAudioStreamQueued(stream);
 
         public static void Delay(uint ms) => SDL_Delay(ms);
 
-        public static uint OpenAudioPlaybackDevice(string deviceName, ref SDL_AudioSpec audioSpec) => SDL_OpenAudioDevice(deviceName, SDL_FALSE, ref audioSpec, out SDL_AudioSpec receivedPlaybackSpec, SDL_FALSE);
+        public static IntPtr OpenAudioDeviceStream(uint deviceId, ref SDL_AudioSpec audioSpec, SDL_AudioStreamCallback callback) =>
+            SDL_OpenAudioDeviceStream(deviceId, ref audioSpec, callback, IntPtr.Zero);
 
-        public static uint OpenAudioRecordingDevice(string deviceName, ref SDL_AudioSpec audioSpec) => SDL_OpenAudioDevice(deviceName, SDL_TRUE, ref audioSpec, out SDL_AudioSpec receivedPlaybackSpec, SDL_FALSE);
+        public static void DestroyAudioStream(IntPtr stream) => SDL_DestroyAudioStream(stream);
 
-        public static void CloseAudioPlaybackDevice(uint deviceId) => CloseAudioDevice(deviceId);
-
-        public static void CloseAudioRecordingDevice(uint deviceId) => CloseAudioDevice(deviceId);
-
-        public static void PauseAudioPlaybackDevice(uint deviceId, bool pauseOn = true) => SDL_PauseAudioDevice(deviceId, pauseOn ? SDL_TRUE : SDL_FALSE);
-
-        public static void PauseAudioRecordingDevice(uint deviceId, bool pauseOn = true) => SDL_PauseAudioDevice(deviceId, pauseOn ? SDL_TRUE : SDL_FALSE);
-
-        public static unsafe void QueueAudioPlaybackDevice(uint deviceId, ref byte[] data, uint len)
+        public static unsafe void PutAudioToStream(IntPtr stream, ref byte[] data, int len)
         {
             fixed (byte* ptr = &data[0])
-                SDL_QueueAudio(deviceId, (IntPtr)ptr, len);
+                SDL_PutAudioStreamData(stream, (IntPtr)ptr, len);
         }
 
-        public static void InitSDL(uint flags = SDL_INIT_AUDIO | SDL_INIT_TIMER)
+        public static void InitSDL(SDL_InitFlags flags = SDL_InitFlags.SDL_INIT_AUDIO | SDL_InitFlags.SDL_INIT_TIMER)
         {
-            if (!_sdl3Initialised)
+            if (_sdl3Initialised) { return; }
+
+            if (!SDL_Init(flags))
             {
-                //SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
-
-                if (SDL_Init(flags) < 0)
-                    throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
-
-                _sdl3Initialised = true;
+                throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
             }
+            _sdl3Initialised = true;
         }
 
         public static void QuitSDL()
         {
-            if (_sdl3Initialised)
-            {
-                SDL_Quit();
-                _sdl3Initialised = false;
-            }
+            if (!_sdl3Initialised) { return; }
+
+            SDL_Quit();
+            _sdl3Initialised = false;
         }
 
-#region PRIVATE methods
+        #region PRIVATE methods
 
-        private static List<string> GetAudioDevices(bool isCapture)
+        private static Dictionary<uint, string> GetAudioDevices(bool isRecording)
         {
-            List<string> result = new List<string>();
-            int isCaptureDevice = isCapture ? SDL_TRUE : SDL_FALSE;
+            Dictionary<uint, string> result = new Dictionary<uint, string>();
 
-            //Get capture device count
-            int deviceCount = SDL_GetNumAudioDevices(isCaptureDevice);
+            //Get device count
+            int count;
+            var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
 
-            if (deviceCount > 0)
+            if (count > 0)
             {
-                string name;
-                for (int index = 0; index < deviceCount; index++)
+                foreach (var device in devices)
                 {
-                    name = SDL_GetAudioDeviceName(index, isCaptureDevice);
+                    var name = SDL_GetAudioDeviceName(device);
                     if (!string.IsNullOrEmpty(name))
-                        result.Add(name);
+                        result.Add(device, name);
                 }
             }
             return result;
         }
 
-        private static string? GetAudioDevice(string startWithName, bool isCapture)
+        private static (uint id, string name)? GetAudioDevice(string startWithName, bool isRecording)
         {
-            string ? result = null;
-            int isCaptureDevice = isCapture ? SDL_TRUE : SDL_FALSE;
+            (uint, string)? result = null;
 
-            //Get capture device count
-            int deviceCount = SDL_GetNumAudioDevices(isCaptureDevice);
-
-            if (deviceCount > 0)
+            //Get recording device count
+            int count;
+            var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
+            if (count > 0)
             {
-                result = SDL_GetAudioDeviceName(0, isCaptureDevice);
+                uint defaultDevice = isRecording
+                    ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING
+                    : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+                result = (defaultDevice, SDL_GetAudioDeviceName(defaultDevice));
 
-                if (deviceCount > 1)
+                if (count > 1)
                 {
-                    for (int index = 1; index < deviceCount; index++)
+                    for (int i = 1; i < devices.Length; i++)
                     {
-                        string deviceName = SDL_GetAudioDeviceName(index, isCaptureDevice);
+                        var deviceName = SDL_GetAudioDeviceName(devices[i]);
                         if (deviceName.StartsWith(startWithName, StringComparison.InvariantCultureIgnoreCase))
-                            return deviceName;
+                        {
+                            return (devices[i], deviceName);
+                        }
                     }
                 }
-                
+
             }
             return result;
         }
 
-        private static string? GetAudioDevice(int index, bool isCapture)
+        private static (uint id, string name)? GetAudioDevice(int index, bool isRecording)
         {
-            string? result = null;
-            int isCaptureDevice = isCapture ? SDL_TRUE : SDL_FALSE;
+            (uint, string)? result = null;
 
-            //Get capture device count
-            int deviceCount = SDL_GetNumAudioDevices(isCaptureDevice);
-
-            if ( (deviceCount > 0) && (index < deviceCount) )
+            int count;
+            var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
+            if (count > 0)
             {
-                return SDL_GetAudioDeviceName(index, isCaptureDevice);
+                if (index < count)
+                {
+                    result = (devices[index], SDL_GetAudioDeviceName(devices[index]));
+                }
             }
             return result;
         }
 
-        private static void CloseAudioDevice(uint deviceId) =>  SDL_CloseAudioDevice(deviceId);
-
-#endregion PRIVATE methods
+        #endregion PRIVATE methods
     }
 }

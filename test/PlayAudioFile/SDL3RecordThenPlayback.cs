@@ -1,13 +1,12 @@
-﻿using SIPSorceryMedia.SDL3;
-using System;
+﻿using System;
 using System.Linq;
 using static SDL3.SDL;
 
-namespace SIPSorceryMedia.FFmpeg
+namespace SIPSorceryMedia.SDL3
 {
     public unsafe class SDL3RecordThenPlayback
     {
-        enum RecordingState
+        private enum RecordingState
         {
             //SELECTING_DEVICE,
             STOPPED,
@@ -18,101 +17,101 @@ namespace SIPSorceryMedia.FFmpeg
         };
 
         //Maximum number of supported recording devices
-        const int MAX_RECORDING_DEVICES = 10;
+        private const int MAX_RECORDING_DEVICES = 10;
 
-		//Maximum recording time
-		const int MAX_RECORDING_SECONDS = 5;
+        //Maximum recording time
+        private const int MAX_RECORDING_SECONDS = 5;
 
-		//Maximum recording time plus padding
-		const int RECORDING_BUFFER_SECONDS = MAX_RECORDING_SECONDS + 1;
+        //Maximum recording time plus padding
+        private const int RECORDING_BUFFER_SECONDS = MAX_RECORDING_SECONDS + 1;
 
-        //Recieved audio spec
-        SDL_AudioSpec gReceivedRecordingSpec;
-        SDL_AudioSpec gReceivedPlaybackSpec;
+        //Received audio spec
+        private readonly SDL_AudioSpec gReceivedRecordingSpec;
+        private SDL_AudioSpec gReceivedPlaybackSpec;
 
         //Recording data buffer
-        byte[] gRecordingBuffer; // Uint8
+        private readonly byte[] gRecordingBuffer; // Uint8
 
         //Size of data buffer
-        uint gBufferByteSize = 0; // Uint32
+        private readonly uint gBufferByteSize = 0; // Uint32
 
         //Position in data buffer
-        uint gBufferBytePosition = 0; // Uint32
+        private uint gBufferBytePosition = 0; // Uint32
 
         //Maximum position in data buffer for recording
-        uint gBufferByteMaxPosition = 0; //Uint32
+        private readonly uint gBufferByteMaxPosition = 0; //Uint32
 
         //Number of available devices
-        uint recordingDeviceId = 0;
-        uint playbackDeviceId = 0;
+        private readonly IntPtr recordingStream;
+        private readonly IntPtr playbackStream;
 
         //String recordingDeviceNameToChoose = "External Mic";
-        string recordingDeviceNameToChoose = "Microphone (2";
+        private readonly string recordingDeviceNameToChoose = "Microphone (2";
 
         //String playbackDeviceNameToChoose = "Realtek HD Audio 2nd output";
-        string playbackDeviceNameToChoose = "Speakers (2";
+        private readonly string playbackDeviceNameToChoose = "Speakers (2";
 
-        RecordingState currentState = RecordingState.STOPPED;
+        private readonly RecordingState currentState = RecordingState.STOPPED;
 
 
-        public unsafe SDL3RecordThenPlayback()
+        public SDL3RecordThenPlayback()
         {
-            SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
+            //SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
 
-            if (SDL_Init(SDL_INIT_AUDIO ) < 0)
+            if (!SDL_Init(SDL_InitFlags.SDL_INIT_AUDIO))
                 throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
 
-            string ? recordingDeviceName = SDL3Helper.GetAudioRecordingDevice(recordingDeviceNameToChoose);
-            if(recordingDeviceName == null)
+            var recordingDevice = SDL3Helper.GetAudioRecordingDevice(recordingDeviceNameToChoose);
+            if (!recordingDevice.HasValue)
                 throw new ApplicationException($"Recording device not found");
 
-            string? playbackDeviceName = SDL3Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
-            if (playbackDeviceName == null)
+            var playbackDevice = SDL3Helper.GetAudioPlaybackDevice(playbackDeviceNameToChoose);
+            if (!playbackDevice.HasValue)
                 throw new ApplicationException($"Playback device not found");
 
             //Default audio spec - recording
-            SDL_AudioSpec desiredRecordingSpec = new SDL_AudioSpec();
-            desiredRecordingSpec.freq = 44100;
-            desiredRecordingSpec.format = AUDIO_F32;
-            desiredRecordingSpec.channels = 2;
-            desiredRecordingSpec.samples = 4096;
-            desiredRecordingSpec.callback = audioRecordingCallback;
+            SDL_AudioSpec desiredRecordingSpec = new SDL_AudioSpec
+            {
+                freq = 44100,
+                format = SDL_AudioFormat.SDL_AUDIO_F32,
+                channels = 2
+            };
 
             //Open recording device
-            recordingDeviceId = SDL_OpenAudioDevice(recordingDeviceName, SDL_TRUE, ref desiredRecordingSpec, out gReceivedRecordingSpec, (int)SDL_AUDIO_ALLOW_FORMAT_CHANGE);
+            recordingStream = SDL3Helper.OpenAudioDeviceStream(recordingDevice.Value.id, ref desiredRecordingSpec, FillRecordingCallback);
 
             //Device failed to open
-            if (recordingDeviceId <= 0)
+            if (recordingStream == IntPtr.Zero)
                 throw new ApplicationException($"Cannot open recording device");
 
 
             //Default audio spec - playback
-            SDL_AudioSpec desiredPlaybackSpec = new SDL_AudioSpec();
-            desiredPlaybackSpec.freq = 44100;
-            desiredPlaybackSpec.format = AUDIO_F32;
-            desiredPlaybackSpec.channels = 2;
-            desiredPlaybackSpec.samples = 4096;
-            desiredPlaybackSpec.callback = audioPlaybackCallback;
+            SDL_AudioSpec desiredPlaybackSpec = new SDL_AudioSpec
+            {
+                freq = 44100,
+                format = SDL_AudioFormat.SDL_AUDIO_F32,
+                channels = 2
+            };
 
             //Open playback device
-            playbackDeviceId = SDL_OpenAudioDevice(playbackDeviceName, SDL_FALSE, ref desiredPlaybackSpec, out gReceivedPlaybackSpec, (int)SDL_AUDIO_ALLOW_FORMAT_CHANGE);
+            playbackStream = SDL3Helper.OpenAudioDeviceStream(playbackDevice.Value.id, ref desiredPlaybackSpec, FillPlaybackCallback);
 
             //Device failed to open
-            if (playbackDeviceId <= 0)
+            if (playbackStream == IntPtr.Zero)
                 throw new ApplicationException($"Cannot open playback device");
 
 
             //Calculate per sample bytes
-            int bytesPerSample = gReceivedRecordingSpec.channels * (SDL_AUDIO_BITSIZE(gReceivedRecordingSpec.format) / 8);
+            int bytesPerSample = gReceivedRecordingSpec.channels * (SDL_AUDIO_BITSIZE((ushort)gReceivedRecordingSpec.format) / 8);
 
             //Calculate bytes per second
-            int bytesPerSecond = SDL3Helper.GetBytesPerSecond(gReceivedRecordingSpec);  //gReceivedRecordingSpec.freq * bytesPerSample;
+            int bytesPerSecond = SDL3Helper.GetBytesPerSecond(gReceivedRecordingSpec);
 
             //Calculate buffer size
-            gBufferByteSize = (uint) (RECORDING_BUFFER_SECONDS * bytesPerSecond);
+            gBufferByteSize = (uint)(RECORDING_BUFFER_SECONDS * bytesPerSecond);
 
             //Calculate max buffer use
-            gBufferByteMaxPosition = (uint) (MAX_RECORDING_SECONDS * bytesPerSecond);
+            gBufferByteMaxPosition = (uint)(MAX_RECORDING_SECONDS * bytesPerSecond);
 
             //Allocate and initialize byte buffer
             gRecordingBuffer = Enumerable.Repeat((byte)0, (int)gBufferByteSize).ToArray();
@@ -130,7 +129,7 @@ namespace SIPSorceryMedia.FFmpeg
                         gBufferBytePosition = 0;
 
                         //Start recording
-                        SDL_PauseAudioDevice(recordingDeviceId, SDL_FALSE);
+                        SDL3Helper.ResumeAudioStreamDevice(recordingStream);
 
                         //Go on to next state
                         currentState = RecordingState.RECORDING;
@@ -138,37 +137,37 @@ namespace SIPSorceryMedia.FFmpeg
 
                     case RecordingState.RECORDING:
                         //Lock callback
-                        SDL_LockAudioDevice(recordingDeviceId);
+                        //SDL_LockAudioDevice(recordingStream);
 
                         //Finished recording
                         if (gBufferBytePosition > gBufferByteMaxPosition)
                         {
                             //Stop recording audio
-                            SDL_PauseAudioDevice(recordingDeviceId, SDL_TRUE);
+                            SDL_PauseAudioDevice(recordingDevice.Value.id);
 
                             //Go back to beginning of buffer
                             gBufferBytePosition = 0;
 
                             //Start playback
-                            SDL_PauseAudioDevice(playbackDeviceId, SDL_FALSE);
+                            SDL_ResumeAudioDevice(recordingDevice.Value.id);
 
                             //Go on to next state
                             currentState = RecordingState.PLAYBACK;
                         }
 
                         //Unlock callback
-                        SDL_UnlockAudioDevice(recordingDeviceId);
+                        //SDL_UnlockAudioDevice(recordingStream);
                         break;
 
                     case RecordingState.PLAYBACK:
                         //Lock callback
-                        SDL_LockAudioDevice(playbackDeviceId);
+                        //SDL_LockAudioDevice(playbackStream);
 
                         //Finished playback
                         if (gBufferBytePosition > gBufferByteMaxPosition)
                         {
                             //Stop playing audio
-                            SDL_PauseAudioDevice(playbackDeviceId, SDL_TRUE);
+                            SDL_PauseAudioDevice(playbackDevice.Value.id);
 
                             //Go on to next state
                             currentState = RecordingState.STOPPED;
@@ -176,7 +175,7 @@ namespace SIPSorceryMedia.FFmpeg
                         }
 
                         //Unlock callback
-                        SDL_UnlockAudioDevice(playbackDeviceId);
+                        //SDL_UnlockAudioDevice(playbackStream);
                         break;
                 }
             }
@@ -184,35 +183,29 @@ namespace SIPSorceryMedia.FFmpeg
             SDL_Quit();
         }
 
-
-        //void audioRecordingCallback(void* userdata, Uint8* stream, int len)
-        void audioRecordingCallback(IntPtr userdata, IntPtr stream, int len)
+        private void FillRecordingCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
         {
             //Copy audio from stream
             fixed (byte* ptr = &gRecordingBuffer[gBufferBytePosition])
             {
-                Buffer.MemoryCopy((byte*)stream, ptr, len, len);
-            }
-            //memcpy(&gRecordingBuffer[gBufferBytePosition], stream, len); //void* memcpy(void* dest, const void* src, size_t n)                              
+                Buffer.MemoryCopy((byte*)stream, ptr, additionalAmount, additionalAmount);
+            }                          
 
             //Move along buffer
-            gBufferBytePosition += (uint)len;
+            gBufferBytePosition += (uint)additionalAmount;
         }
 
-        //void audioPlaybackCallback(void* userdata, Uint8* stream, int len)
-        void audioPlaybackCallback(IntPtr userdata, IntPtr stream, int len)
+        void FillPlaybackCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
         {
             //Copy audio from stream
             fixed (byte* ptr = &gRecordingBuffer[gBufferBytePosition])
             {
-                Buffer.MemoryCopy(ptr, (byte*)stream, len, len);
+                Buffer.MemoryCopy(ptr, (byte*)stream, additionalAmount, additionalAmount);
             }
-            //memcpy(stream, &gRecordingBuffer[gBufferBytePosition], len); //void* memcpy(void* dest, const void* src, size_t n)
 
             //Move along buffer
-            gBufferBytePosition += (uint)len;
+            gBufferBytePosition += (uint)additionalAmount;
         }
-
 
         //public unsafe SDL3AudioPlayBack(String path)
         //      {

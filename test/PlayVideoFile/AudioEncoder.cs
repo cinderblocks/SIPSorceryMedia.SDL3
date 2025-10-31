@@ -17,7 +17,7 @@ namespace PlayVideoFile
         {
             get => _supportedFormats;
         }
-  
+
         byte[] IAudioEncoder.EncodeAudio(short[] pcm, AudioFormat format)
         {
             if (format.Codec == AudioCodecsEnum.PCMA)

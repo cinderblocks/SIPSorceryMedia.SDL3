@@ -10,26 +10,22 @@ namespace PlayVideoFile
     internal class ProgramPlayVideoFile
     {
         // Path to a valid Video file
-        const string VIDEO_FILE_PATH = "./../../../../../media/big_buck_bunny.mp4";
+        private const string VIDEO_FILE_PATH = "./../../../../../media/big_buck_bunny.mp4";
 
         // Path to FFmpeg library
         private const string FFMPEG_LIB_PATH = @"C:\ffmpeg-4.4.1-full_build-shared\bin"; // On Windows
         //private const string LIB_PATH = @"/usr/local/Cellar/ffmpeg/4.4.1_5/lib"; // On MacBookPro
         //private const string LIB_PATH = @"..\..\..\..\..\lib\x64";
 
-        static AsciiFrame ? asciiFrame = null;
-        static SDL3AudioEndPoint ? audioEndPoint = null;
+        private static AsciiFrame? asciiFrame = null;
+        private static SDL3AudioEndPoint? audioEndPoint = null;
 
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
             int audioPlaybackDeviceIndex = 0; // To store the index of the audio playback device selected
             string audioPlaybackDeviceName; // To store the name of the audio playback device selected
 
             VideoCodecsEnum VideoCodec = VideoCodecsEnum.H264;
-            IVideoSource videoSource;
-            IAudioSource audioSource;
-
-            AudioEncoder audioEncoder;
 
             Console.Clear();
 
@@ -45,10 +41,10 @@ namespace PlayVideoFile
             Console.WriteLine("\nInit done");
 
             // Get list of Audio Playback devices
-            List<string> sdlDevices = SIPSorceryMedia.SDL3.SDL3Helper.GetAudioPlaybackDevices();
+            var sdlDevices =SDL3Helper.GetAudioPlaybackDevices();
 
             // Quit since no Audio playback found
-            if ((sdlDevices == null) || (sdlDevices.Count == 0))
+            if (sdlDevices.Count == 0)
             {
                 Console.WriteLine("No Audio playback devices found ...");
                 SDL3Helper.QuitSDL();
@@ -84,7 +80,7 @@ namespace PlayVideoFile
             Console.WriteLine($"\nDevice selected: {audioPlaybackDeviceName}");
 
             //Create AudioEncoder: Genereic object used to Encode or Decode Audio Sample
-            audioEncoder = new AudioEncoder();
+            var audioEncoder = new AudioEncoder();
 
             // Create audio end point: it will be used to play back tuhe audio from the video file
             audioEndPoint = new SDL3AudioEndPoint(audioPlaybackDeviceName, audioEncoder);
@@ -96,12 +92,12 @@ namespace PlayVideoFile
 
             // Create VideoSource Interface using video file
             SIPSorceryMedia.FFmpeg.FFmpegFileSource fileSource = new SIPSorceryMedia.FFmpeg.FFmpegFileSource(VIDEO_FILE_PATH, false, audioEncoder);
-            videoSource = fileSource as IVideoSource;
+            var videoSource = fileSource as IVideoSource;
             videoSource.RestrictFormats(x => x.Codec == VideoCodec);
             videoSource.SetVideoSourceFormat(videoSource.GetVideoSourceFormats().Find(x => x.Codec == VideoCodec));
             videoSource.OnVideoSourceRawSampleFaster += FileSource_OnVideoSourceRawSampleFaster;
 
-            audioSource = fileSource as IAudioSource;
+            var audioSource = fileSource as IAudioSource;
             audioSource.SetAudioSourceFormat(audioSource.GetAudioSourceFormats().Find(x => x.Codec == AudioCodecsEnum.PCMU));
             audioSource.OnAudioSourceRawSample += FileSource_OnAudioSourceRawSample;
 
