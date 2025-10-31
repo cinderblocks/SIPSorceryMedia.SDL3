@@ -154,10 +154,8 @@ namespace SIPSorceryMedia.SDL3
             var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
             if (count > 0)
             {
-                uint defaultDevice = isRecording
-                    ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING
-                    : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
-                result = (defaultDevice, SDL_GetAudioDeviceName(defaultDevice));
+                uint defaultDevice = isRecording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+                result = (defaultDevice, string.Empty);
 
                 if (count > 1)
                 {
@@ -183,7 +181,10 @@ namespace SIPSorceryMedia.SDL3
             var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
             if (count > 0)
             {
-                if (index < count)
+                uint defaultDevice = isRecording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+                result = (defaultDevice, string.Empty);
+
+                if (index < count && index > 0)
                 {
                     result = (devices[index], SDL_GetAudioDeviceName(devices[index]));
                 }

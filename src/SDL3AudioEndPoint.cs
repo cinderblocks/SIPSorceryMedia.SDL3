@@ -39,6 +39,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using SDL3;
 
 namespace SIPSorceryMedia.SDL3
 {
@@ -60,22 +61,33 @@ namespace SIPSorceryMedia.SDL3
         public event SourceErrorDelegate ? OnAudioSinkError = null;
 
         /// <summary>
-        /// Creates a new basic RTP session that captures and renders audio to/from the system devices.
+        /// Creates a new basic RTP session that renders audio from the system devices.
         /// </summary>
+        /// <param name="audioPlaybackDeviceName">Name of the requested audio playback to use.</param>
         /// <param name="audioEncoder">An audio encoder that can be used to encode and decode
         /// specific audio codecs.</param>
-        /// <param name="audioOutDeviceName">Name of the requested audio playback to use.</param>
-        public SDL3AudioEndPoint(string audioOutDeviceName, IAudioEncoder audioEncoder)
+        /// <exception cref="ApplicationException"></exception>
+        public SDL3AudioEndPoint(string? audioPlaybackDeviceName, IAudioEncoder audioEncoder)
         {
             _audioFormatManager = new MediaFormatManager<AudioFormat>(audioEncoder.SupportedFormats);
             _audioEncoder = audioEncoder;
 
-            var device = SDL3Helper.GetAudioRecordingDevice(audioOutDeviceName);
-            if (!device.HasValue)
+            // if null is passed, use default device
+            if (string.IsNullOrEmpty(audioPlaybackDeviceName))
             {
-                throw new ApplicationException($"Could not get audio recording device named {audioOutDeviceName}");
+                _audioDevice = (SDL.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, "Default Speakers");
             }
-            _audioDevice = device.Value;
+            else
+            {
+                var device = SDL3Helper.GetAudioRecordingDevice(audioPlaybackDeviceName!);
+                if (!device.HasValue)
+                {
+                    throw new ApplicationException(
+                        $"Could not get audio playback device named '{audioPlaybackDeviceName}'");
+                }
+
+                _audioDevice = device.Value;
+            }
         }
 
         private void RaiseAudioSinkError(string err)

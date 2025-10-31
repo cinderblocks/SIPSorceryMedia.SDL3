@@ -39,6 +39,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
+using SDL3;
 
 namespace SIPSorceryMedia.SDL3
 {
@@ -61,24 +62,41 @@ namespace SIPSorceryMedia.SDL3
 
         private AudioSamplingRatesEnum audioSamplingRates;
 
-#region EVENT
+        #region EVENT
 
         public event EncodedSampleDelegate? OnAudioSourceEncodedSample = null;
         public event RawAudioSampleDelegate? OnAudioSourceRawSample = null;
         public event SourceErrorDelegate? OnAudioSourceError = null;
         public event Action<EncodedAudioFrame>? OnAudioSourceEncodedFrameReady = null;
 
-#endregion EVENT
+        #endregion EVENT
 
-        public SDL3AudioSource(string audioInDeviceName, IAudioEncoder audioEncoder, int frameSize = 1920)
+        /// <summary>
+        /// Creates a new basic RTP session that captures audio from the system devices.
+        /// </summary>
+        /// <param name="audioInDeviceName">Name of the requested audio recording device to use</param>
+        /// <param name="audioEncoder">An audio encoder that can be used to encode and decode
+        /// specific audio codecs.</param>
+        /// <param name="frameSize"></param>
+        /// <exception cref="ApplicationException"></exception>
+        public SDL3AudioSource(string? audioInDeviceName, IAudioEncoder audioEncoder, int frameSize = 1920)
         {
             if (audioEncoder == null)
                 throw new ApplicationException("Audio encoder provided is null");
-            var device = SDL3Helper.GetAudioPlaybackDevice(audioInDeviceName);
-            if (!device.HasValue)
-                throw new ApplicationException($"Could not get audio device {audioInDeviceName}");
 
-            _audioDevice = device.Value;
+            if (string.IsNullOrEmpty(audioInDeviceName))
+            {
+                _audioDevice = (SDL.SDL_AUDIO_DEVICE_DEFAULT_RECORDING, "Default Microphone");
+            }
+            else
+            {
+                var device = SDL3Helper.GetAudioPlaybackDevice(audioInDeviceName!);
+                if (!device.HasValue)
+                {
+                    throw new ApplicationException($"Could not get audio device named '{audioInDeviceName}'");
+                }
+                _audioDevice = device.Value;
+            }
 
             _audioFormatManager = new MediaFormatManager<AudioFormat>(audioEncoder.SupportedFormats);
             _audioEncoder = audioEncoder;
