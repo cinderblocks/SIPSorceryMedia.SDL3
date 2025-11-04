@@ -93,8 +93,8 @@ namespace SIPSorceryMedia.SDL3
 
         public static void Delay(uint ms) => SDL_Delay(ms);
 
-        public static IntPtr OpenAudioDeviceStream(uint deviceId, ref SDL_AudioSpec audioSpec, SDL_AudioStreamCallback callback) =>
-            SDL_OpenAudioDeviceStream(deviceId, ref audioSpec, callback, IntPtr.Zero);
+        public static IntPtr OpenAudioDeviceStream(uint deviceId, ref SDL_AudioSpec audioSpec) =>
+            SDL_OpenAudioDeviceStream(deviceId, ref audioSpec, null, IntPtr.Zero);
 
         public static void DestroyAudioStream(IntPtr stream) => SDL_DestroyAudioStream(stream);
 

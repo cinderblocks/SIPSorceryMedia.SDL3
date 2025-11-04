@@ -139,7 +139,7 @@ namespace SIPSorceryMedia.SDL3
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
 
-                _audioStream = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, FeedStreamCallback);
+                _audioStream = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec);
                 if(_audioStream != IntPtr.Zero)
                     log.LogDebug("[InitPlaybackDevice] Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
@@ -155,11 +155,6 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
-        private void FeedStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
-        {
-            //throw new NotImplementedException();
-        }
-
         /// <summary>
         /// Event handler for playing audio samples received from the remote call party.
         /// </summary>
@@ -169,6 +164,10 @@ namespace SIPSorceryMedia.SDL3
             if (_audioStream != IntPtr.Zero)
             {
                 SDL3Helper.PutAudioToStream(_audioStream, ref pcmSample, pcmSample.Length);
+            }
+            else
+            {
+                log.LogWarning("Tried to put audio to stream, but stream doesn't exist.");
             }
         }
 
@@ -187,10 +186,15 @@ namespace SIPSorceryMedia.SDL3
         {
             if (_isStarted && !_isPaused)
             {
-                SDL3Helper.PauseAudioStreamDevice(_audioStream);
-                _isPaused = true;
-
-                log.LogDebug("[PauseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
+                if (SDL3Helper.PauseAudioStreamDevice(_audioStream))
+                {
+                    _isPaused = true;
+                    log.LogDebug("[PauseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
+                }
+                else
+                {
+                    log.LogWarning("[PauseAudio] Failed to pause [{AudioOutDeviceId}] - {error}", _audioDevice.id, SDL.SDL_GetError());
+                }
             }
 
             return Task.CompletedTask;
@@ -200,10 +204,15 @@ namespace SIPSorceryMedia.SDL3
         {
             if (_isStarted && _isPaused)
             {
-                SDL3Helper.PauseAudioStreamDevice(_audioStream);
-                _isPaused = false;
-
-                log.LogDebug("[ResumeAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
+                if (SDL3Helper.ResumeAudioStreamDevice(_audioStream))
+                {
+                    _isPaused = false;
+                    log.LogDebug("[ResumeAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
+                }
+                else
+                {
+                    log.LogWarning("[PauseAudio] Failed to resume [{AudioOutDeviceId}] - {error}", _audioDevice.id, SDL.SDL_GetError());
+                }
             }
 
             return Task.CompletedTask;

@@ -177,7 +177,7 @@ namespace SIPSorceryMedia.SDL3
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate);
                 //int bytesPerSecond = SDL3Helper.GetBytesPerSecond(audioSpec);
 
-                _audioStream = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
+                _audioStream = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec);
                 if (_audioStream != IntPtr.Zero)
                     log.LogDebug("[InitRecordingDevice] Audio source - Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
@@ -191,11 +191,6 @@ namespace SIPSorceryMedia.SDL3
                 log.LogError(ex, "InitRecordingDevice] SDLAudioSource failed to initialise device [{AudioDeviceId} ] - [ {AudioDeviceName}].", _audioDevice.id, _audioDevice.name);
                 RaiseAudioSourceError($"SDLAudioSource failed to initialise device [{_audioDevice.name}] and [{_audioDevice.id}] - Exception:[{ex.Message}]");
             }
-        }
-
-        private void UnqueueStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
-        {
-            //throw new NotImplementedException();
         }
 
         public Task PauseAudio()
@@ -223,7 +218,7 @@ namespace SIPSorceryMedia.SDL3
                     backgroundWorker.RunWorkerAsync();
 
                 if (_audioStream != IntPtr.Zero)
-                    SDL3Helper.PauseAudioStreamDevice(_audioStream);
+                    SDL3Helper.ResumeAudioStreamDevice(_audioStream);
 
                 _isPaused = false;
                 log.LogDebug("[ResumeAudio] Audio source - Id:[{AudioInDeviceId}]", _audioDevice.id);
