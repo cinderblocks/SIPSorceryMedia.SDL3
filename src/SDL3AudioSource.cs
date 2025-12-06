@@ -50,6 +50,8 @@ namespace SIPSorceryMedia.SDL3
         private readonly (uint id, string name) _audioDevice;
         private IntPtr _audioStream = IntPtr.Zero;
 
+        private readonly object _stateLock = new object();
+
         private readonly IAudioEncoder _audioEncoder;
         private readonly MediaFormatManager<AudioFormat> _audioFormatManager;
 
@@ -75,9 +77,9 @@ namespace SIPSorceryMedia.SDL3
         {
             if (audioEncoder == null)
                 throw new ApplicationException("Audio encoder provided is null");
-            var device = SDL3Helper.GetAudioPlaybackDevice(audioInDeviceName);
+            var device = SDL3Helper.GetAudioRecordingDevice(audioInDeviceName);
             if (!device.HasValue)
-                throw new ApplicationException($"Could not get audio playback device {audioInDeviceName}");
+                throw new ApplicationException($"Could not get audio recording device {audioInDeviceName}");
 
             _audioDevice = device.Value;
 
@@ -108,13 +110,19 @@ namespace SIPSorceryMedia.SDL3
                 do
                 {
                     // Check if device is not stopped
-                    if (_audioStream == IntPtr.Zero)
+                    IntPtr stream;
+                    lock (_stateLock)
+                    {
+                        stream = _audioStream;
+                    }
+
+                    if (stream == IntPtr.Zero)
                     {
                         RaiseAudioSourceError($"SDLAudioSource [{_audioDevice.name}] stopped.");
                         return;
                     }
 
-                    size = SDL3Helper.GetAudioStreamQueued(_audioStream);
+                    size = SDL3Helper.GetAudioStreamQueued(stream);
                     if (size >= frameSize * 2) // Need to use double size since we get byte[] and not short[] from SDL
                     {
                         if (frameSize != 0)
@@ -128,7 +136,7 @@ namespace SIPSorceryMedia.SDL3
                         {
                             fixed (byte* ptr = &buf[0])
                             {
-                                SDL3Helper.PutAudio(_audioStream, (IntPtr)ptr, bufferSize);
+                                SDL3Helper.PutAudio(stream, (IntPtr)ptr, bufferSize);
 
                                 int shortCount = bufferSize / sizeof(short);
                                 short[] pcm = new short[shortCount];
@@ -172,8 +180,14 @@ namespace SIPSorceryMedia.SDL3
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate);
                 //int bytesPerSecond = SDL3Helper.GetBytesPerSecond(audioSpec);
 
-                _audioStream = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
-                if (_audioStream != IntPtr.Zero)
+                var stream = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
+
+                lock (_stateLock)
+                {
+                    _audioStream = stream;
+                }
+
+                if (stream != IntPtr.Zero)
                     log.LogDebug("[InitRecordingDevice] Audio source - Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
                 {
@@ -195,15 +209,25 @@ namespace SIPSorceryMedia.SDL3
 
         public Task PauseAudio()
         {
-            if (_isStarted && !_isPaused)
+            IntPtr stream = IntPtr.Zero;
+            bool doPause = false;
+
+            lock (_stateLock)
+            {
+                if (_isStarted && !_isPaused)
+                {
+                    _isPaused = true;
+                    doPause = true;
+                    stream = _audioStream;
+                }
+            }
+
+            if (doPause && stream != IntPtr.Zero)
             {
                 if (backgroundWorker.IsBusy)
                     backgroundWorker.CancelAsync();
 
-                if(_audioStream != IntPtr.Zero)
-                    SDL3Helper.PauseAudioStreamDevice(_audioStream);
-                
-                _isPaused = true;
+                SDL3Helper.PauseAudioStreamDevice(stream);
                 log.LogDebug("[PauseAudio] Audio source - Id:[{AudioInDeviceId}]", _audioDevice.id);
             }
 
@@ -212,15 +236,25 @@ namespace SIPSorceryMedia.SDL3
 
         public Task ResumeAudio()
         {
-            if (_isStarted && _isPaused)
+            IntPtr stream = IntPtr.Zero;
+            bool doResume = false;
+
+            lock (_stateLock)
+            {
+                if (_isStarted && _isPaused)
+                {
+                    _isPaused = false;
+                    doResume = true;
+                    stream = _audioStream;
+                }
+            }
+
+            if (doResume && stream != IntPtr.Zero)
             {
                 if (!backgroundWorker.IsBusy)
                     backgroundWorker.RunWorkerAsync();
 
-                if (_audioStream != IntPtr.Zero)
-                    SDL3Helper.ResumeAudioStreamDevice(_audioStream);
-
-                _isPaused = false;
+                SDL3Helper.ResumeAudioStreamDevice(stream);
                 log.LogDebug("[ResumeAudio] Audio source - Id:[{AudioInDeviceId}]", _audioDevice.id);
             }
 
@@ -229,16 +263,27 @@ namespace SIPSorceryMedia.SDL3
 
         public bool IsAudioSourcePaused()
         {
-            return _isPaused;
+            lock (_stateLock)
+            {
+                return _isPaused;
+            }
         }
 
         public Task StartAudio()
         {
-            if (!_isStarted && _audioStream != IntPtr.Zero)
+            bool needResume = false;
+            lock (_stateLock)
             {
-                _isStarted = true;
-                _isPaused = true;
+                if (!_isStarted && _audioStream != IntPtr.Zero)
+                {
+                    _isStarted = true;
+                    _isPaused = true;
+                    needResume = true;
+                }
+            }
 
+            if (needResume)
+            {
                 ResumeAudio().Wait();
             }
 
@@ -247,19 +292,32 @@ namespace SIPSorceryMedia.SDL3
 
         public Task CloseAudio()
         {
-            if (_isStarted)
+            // Ensure audio paused first
+            PauseAudio().Wait();
+
+            IntPtr streamToDestroy = IntPtr.Zero;
+
+            lock (_stateLock)
             {
-                PauseAudio().Wait();
-                if (_audioStream != IntPtr.Zero)
+                streamToDestroy = _audioStream;
+                _audioStream = IntPtr.Zero;
+                _isStarted = false;
+                _isPaused = true;
+            }
+
+            if (streamToDestroy != IntPtr.Zero)
+            {
+                try
                 {
-                    SDL3Helper.DestroyAudioStream(_audioStream);
+                    SDL3Helper.DestroyAudioStream(streamToDestroy);
                     log.LogDebug("[CloseAudio] Audio source - Id:[{AudioInDeviceId}] - Name:[{AudioInDeviceName}]", 
                         _audioDevice.id, _audioDevice.name);
                 }
+                catch (Exception ex)
+                {
+                    log.LogError(ex, "Error destroying audio stream");
+                }
             }
-
-            _isStarted = false;
-            _audioStream = IntPtr.Zero;
 
             return Task.CompletedTask;
         }
