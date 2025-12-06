@@ -49,12 +49,11 @@ namespace SIPSorceryMedia.SDL3
     {
         private readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioEndPoint>();
 
-
         private readonly IAudioEncoder _audioEncoder;
         private readonly MediaFormatManager<AudioFormat> _audioFormatManager;
 
         private readonly (uint id, string name) _audioDevice;
-        private IntPtr _audioStream = IntPtr.Zero;
+        private SDL3AudioStreamSafeHandle? _audioStream = null;
 
         private readonly object _stateLock = new object();
 
@@ -150,14 +149,22 @@ namespace SIPSorceryMedia.SDL3
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
 
-                var stream = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, FeedStreamCallback);
+                var streamPtr = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, FeedStreamCallback);
+
+                SDL3AudioStreamSafeHandle? newHandle = null;
+                if (streamPtr != IntPtr.Zero)
+                {
+                    newHandle = new SDL3AudioStreamSafeHandle(streamPtr);
+                }
 
                 lock (_stateLock)
                 {
-                    _audioStream = stream;
+                    // dispose previous handle if present
+                    _audioStream?.Dispose();
+                    _audioStream = newHandle;
                 }
 
-                if(stream != IntPtr.Zero)
+                if(newHandle != null && !newHandle.IsInvalid)
                     log.LogDebug("[InitPlaybackDevice] Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
                 {
@@ -168,7 +175,7 @@ namespace SIPSorceryMedia.SDL3
             catch (Exception e)
             {
                 log.LogError(e, "[InitPlaybackDevice] SDLAudioEndPoint failed to initialise device - Id:[{AudioDeviceId}   ] - DeviceName:[   {AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
-                RaiseAudioSinkError($"SDLAudioEndPoint failed to initialise device. No audio device found - Id:[{_audioDevice.id}] - DeviceName:[{_audioDevice.name}] - Exception:[{e.Message}]");
+                RaiseAudioSinkError($"SDLAudioEndPoint failed to initialise device. No audio device found - Id:[{_audioDevice.id}] - DeviceName:[{_audioDevice.name}] - Exception:[{e.Message}]" );
             }
         }
 
@@ -176,18 +183,18 @@ namespace SIPSorceryMedia.SDL3
         {
             try
             {
-                // Callback invoked by SDL when the audio device stream reports space/need.
-                // We keep this callback non-blocking: capture current stream handle and log queued bytes.
-                IntPtr currentStream;
+                SDL3AudioStreamSafeHandle? currentHandle;
                 lock (_stateLock)
                 {
-                    currentStream = _audioStream;
+                    currentHandle = _audioStream;
                 }
 
-                if (currentStream == IntPtr.Zero)
+                if (currentHandle == null || currentHandle.IsInvalid)
                 {
                     return;
                 }
+
+                IntPtr currentStream = currentHandle.DangerousGetHandle();
 
                 // Log debug info for diagnostics. Do not perform heavy work here.
                 int queued = SDL3Helper.GetAudioStreamQueued(currentStream);
@@ -216,23 +223,25 @@ namespace SIPSorceryMedia.SDL3
 
                 while (_playbackQueue.TryDequeue(out var seg))
                 {
-                    IntPtr stream;
+                    SDL3AudioStreamSafeHandle? currentHandle;
                     lock (_stateLock)
                     {
-                        stream = _audioStream;
+                        currentHandle = _audioStream;
                     }
 
-                    if (stream == IntPtr.Zero)
+                    if (currentHandle == null || currentHandle.IsInvalid)
                     {
                         // return buffer
                         try { pool.Return(seg.Buffer); } catch { }
                         continue;
                     }
 
+                    IntPtr streamPtr = currentHandle.DangerousGetHandle();
+
                     try
                     {
                         // Put bytes into SDL stream
-                        SDL3Helper.PutAudioToStream(stream, ref seg.Buffer, seg.Length);
+                        SDL3Helper.PutAudioToStream(streamPtr, ref seg.Buffer, seg.Length);
                     }
                     catch (Exception ex)
                     {
@@ -270,13 +279,13 @@ namespace SIPSorceryMedia.SDL3
         [Obsolete("Use GotEncodeMediaFrame instead.")]
         public void GotAudioRtp(IPEndPoint remoteEndPoint, uint ssrc, uint seqnum, uint timestamp, int payloadID, bool marker, byte[] payload)
         {
-            IntPtr stream;
+            SDL3AudioStreamSafeHandle? currentHandle;
             lock (_stateLock)
             {
-                stream = _audioStream;
+                currentHandle = _audioStream;
             }
 
-            if (stream == IntPtr.Zero) { return; }
+            if (currentHandle == null || currentHandle.IsInvalid) { return; }
 
             // Decode sample
             var pcmSample = _audioEncoder.DecodeAudio(payload, _audioFormatManager.SelectedFormat);
@@ -287,7 +296,7 @@ namespace SIPSorceryMedia.SDL3
 
         public Task PauseAudioSink()
         {
-            IntPtr stream = IntPtr.Zero;
+            SDL3AudioStreamSafeHandle? currentHandle = null;
             bool doPause = false;
 
             lock (_stateLock)
@@ -296,17 +305,17 @@ namespace SIPSorceryMedia.SDL3
                 {
                     _isPaused = true;
                     doPause = true;
-                    stream = _audioStream;
+                    currentHandle = _audioStream;
                 }
             }
 
-            if (doPause && stream != IntPtr.Zero)
+            if (doPause && currentHandle != null && !currentHandle.IsInvalid)
             {
                 // stop worker
                 if (_playbackWorker.IsBusy)
                     _playbackWorker.CancelAsync();
 
-                SDL3Helper.PauseAudioStreamDevice(stream);
+                SDL3Helper.PauseAudioStreamDevice(currentHandle.DangerousGetHandle());
                 log.LogDebug("[PauseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
 
@@ -315,7 +324,7 @@ namespace SIPSorceryMedia.SDL3
 
         public Task ResumeAudioSink()
         {
-            IntPtr stream = IntPtr.Zero;
+            SDL3AudioStreamSafeHandle? currentHandle = null;
             bool doResume = false;
 
             lock (_stateLock)
@@ -324,16 +333,16 @@ namespace SIPSorceryMedia.SDL3
                 {
                     _isPaused = false;
                     doResume = true;
-                    stream = _audioStream;
+                    currentHandle = _audioStream;
                 }
             }
 
-            if (doResume && stream != IntPtr.Zero)
+            if (doResume && currentHandle != null && !currentHandle.IsInvalid)
             {
                 if (!_playbackWorker.IsBusy)
                     _playbackWorker.RunWorkerAsync();
 
-                SDL3Helper.ResumeAudioStreamDevice(stream);
+                SDL3Helper.ResumeAudioStreamDevice(currentHandle.DangerousGetHandle());
                 log.LogDebug("[ResumeAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
 
@@ -345,7 +354,7 @@ namespace SIPSorceryMedia.SDL3
             bool needResume = false;
             lock (_stateLock)
             {
-                if(!_isStarted && _audioStream != IntPtr.Zero)
+                if(!_isStarted && _audioStream != null && !_audioStream.IsInvalid)
                 {
                     _isStarted = true;
                     _isClosed = false;
@@ -368,24 +377,22 @@ namespace SIPSorceryMedia.SDL3
             // Ensure audio paused first
             PauseAudioSink().Wait();
 
-            IntPtr streamToDestroy = IntPtr.Zero;
-            bool wasStarted = false;
+            SDL3AudioStreamSafeHandle? toDispose = null;
 
             lock (_stateLock)
             {
-                streamToDestroy = _audioStream;
-                wasStarted = _isStarted;
-                _audioStream = IntPtr.Zero;
+                toDispose = _audioStream;
+                _audioStream = null;
                 _isClosed = true;
                 _isStarted = false;
                 _isPaused = true;
             }
 
-            if (streamToDestroy != IntPtr.Zero)
+            if (toDispose != null && !toDispose.IsInvalid)
             {
                 try
                 {
-                    SDL3Helper.DestroyAudioStream(streamToDestroy);
+                    toDispose.Dispose();
                 }
                 catch (Exception ex)
                 {
@@ -431,25 +438,7 @@ namespace SIPSorceryMedia.SDL3
             }
             else
             {
-                // finalizer: best-effort unmanaged cleanup without touching managed state
-                IntPtr streamToDestroy = IntPtr.Zero;
-                lock (_stateLock)
-                {
-                    streamToDestroy = _audioStream;
-                    _audioStream = IntPtr.Zero;
-                }
-
-                if (streamToDestroy != IntPtr.Zero)
-                {
-                    try
-                    {
-                        SDL3Helper.DestroyAudioStream(streamToDestroy);
-                    }
-                    catch
-                    {
-                        // swallow exceptions in finalizer
-                    }
-                }
+                // finalizer: nothing to do, SafeHandle will free the native resource
             }
         }
 
