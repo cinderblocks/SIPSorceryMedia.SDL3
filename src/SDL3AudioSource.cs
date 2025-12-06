@@ -35,6 +35,7 @@
 using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -76,7 +77,7 @@ namespace SIPSorceryMedia.SDL3
                 throw new ApplicationException("Audio encoder provided is null");
             var device = SDL3Helper.GetAudioPlaybackDevice(audioInDeviceName);
             if (!device.HasValue)
-                throw new ApplicationException($"Could not get audio device {audioInDeviceName}");
+                throw new ApplicationException($"Could not get audio playback device {audioInDeviceName}");
 
             _audioDevice = device.Value;
 
@@ -98,6 +99,8 @@ namespace SIPSorceryMedia.SDL3
 
         private unsafe void BackgroundWorker_DoWork(object? sender, DoWorkEventArgs e)
         {
+            var pool = ArrayPool<byte>.Shared;
+
             while (!backgroundWorker.CancellationPending)
             {
                 int size = 0;
@@ -119,21 +122,31 @@ namespace SIPSorceryMedia.SDL3
                         else
                             bufferSize = size;
 
-                        byte[] buf = new byte[bufferSize];
+                        byte[] buf = pool.Rent(bufferSize);
 
-                        fixed (byte* ptr = &buf[0])
+                        try
                         {
-                            SDL3Helper.PutAudio(_audioStream, (IntPtr)ptr, bufferSize);
-
-                            short[] pcm = buf.Take(bufferSize * 2).Where((x, i) => i % 2 == 0).Select((y, i) => BitConverter.ToInt16(buf, i * 2)).ToArray();
-                            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
-
-                            if (OnAudioSourceEncodedSample != null)
+                            fixed (byte* ptr = &buf[0])
                             {
-                                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
-                                if (encodedSample.Length > 0)
-                                    OnAudioSourceEncodedSample?.Invoke((uint)( pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
+                                SDL3Helper.PutAudio(_audioStream, (IntPtr)ptr, bufferSize);
+
+                                int shortCount = bufferSize / sizeof(short);
+                                short[] pcm = new short[shortCount];
+                                Buffer.BlockCopy(buf, 0, pcm, 0, shortCount * sizeof(short));
+
+                                OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
+
+                                if (OnAudioSourceEncodedSample != null)
+                                {
+                                    var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
+                                    if (encodedSample.Length > 0)
+                                        OnAudioSourceEncodedSample?.Invoke((uint)( pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
+                                }
                             }
+                        }
+                        finally
+                        {
+                            pool.Return(buf);
                         }
 
                         size -= bufferSize;
@@ -205,7 +218,7 @@ namespace SIPSorceryMedia.SDL3
                     backgroundWorker.RunWorkerAsync();
 
                 if (_audioStream != IntPtr.Zero)
-                    SDL3Helper.PauseAudioStreamDevice(_audioStream);
+                    SDL3Helper.ResumeAudioStreamDevice(_audioStream);
 
                 _isPaused = false;
                 log.LogDebug("[ResumeAudio] Audio source - Id:[{AudioInDeviceId}]", _audioDevice.id);

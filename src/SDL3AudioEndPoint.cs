@@ -36,7 +36,6 @@ using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 
@@ -92,7 +91,9 @@ namespace SIPSorceryMedia.SDL3
             {
                 // Decode sample
                 var pcmSample = _audioEncoder.DecodeAudio(encodedMediaFrame.EncodedAudio, audioFormat);
-                byte[] pcmBytes = pcmSample.SelectMany(BitConverter.GetBytes).ToArray();
+                // Convert short[] to byte[] efficiently
+                var pcmBytes = new byte[pcmSample.Length * sizeof(short)];
+                Buffer.BlockCopy(pcmSample, 0, pcmBytes, 0, pcmBytes.Length);
                 PutAudioSample(pcmBytes);
             }
         }
@@ -167,7 +168,8 @@ namespace SIPSorceryMedia.SDL3
 
             // Decode sample
             var pcmSample = _audioEncoder.DecodeAudio(payload, _audioFormatManager.SelectedFormat);
-            byte[] pcmBytes = pcmSample.SelectMany(BitConverter.GetBytes).ToArray();
+            var pcmBytes = new byte[pcmSample.Length * sizeof(short)];
+            Buffer.BlockCopy(pcmSample, 0, pcmBytes, 0, pcmBytes.Length);
             PutAudioSample(pcmBytes);
         }
 
@@ -188,7 +190,7 @@ namespace SIPSorceryMedia.SDL3
         {
             if (_isStarted && _isPaused)
             {
-                SDL3Helper.PauseAudioStreamDevice(_audioStream);
+                SDL3Helper.ResumeAudioStreamDevice(_audioStream);
                 _isPaused = false;
 
                 log.LogDebug("[ResumeAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
