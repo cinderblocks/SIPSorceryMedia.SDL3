@@ -41,7 +41,7 @@ using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
 {
-    public class SDL3AudioEndPoint : IAudioSink
+    public class SDL3AudioEndPoint : IAudioSink, IDisposable
     {
         private readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioEndPoint>();
 
@@ -57,6 +57,8 @@ namespace SIPSorceryMedia.SDL3
         protected bool _isStarted = false;
         protected bool _isPaused = true;
         protected bool _isClosed = true;
+
+        private bool _disposed = false;
 
         public event SourceErrorDelegate ? OnAudioSinkError = null;
 
@@ -77,6 +79,11 @@ namespace SIPSorceryMedia.SDL3
                 throw new ApplicationException($"Could not get audio recording device named {audioOutDeviceName}");
             }
             _audioDevice = device.Value;
+        }
+
+        ~SDL3AudioEndPoint()
+        {
+            Dispose(false);
         }
 
         private void RaiseAudioSinkError(string err)
@@ -297,6 +304,53 @@ namespace SIPSorceryMedia.SDL3
             }
 
             return Task.CompletedTask;
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            if (disposing)
+            {
+                // dispose managed
+                try
+                {
+                    CloseAudioSink().Wait();
+                }
+                catch (Exception ex)
+                {
+                    log.LogError(ex, "Error during Dispose CloseAudioSink");
+                }
+            }
+            else
+            {
+                // finalizer: best-effort unmanaged cleanup without touching managed state
+                IntPtr streamToDestroy = IntPtr.Zero;
+                lock (_stateLock)
+                {
+                    streamToDestroy = _audioStream;
+                    _audioStream = IntPtr.Zero;
+                }
+
+                if (streamToDestroy != IntPtr.Zero)
+                {
+                    try
+                    {
+                        SDL3Helper.DestroyAudioStream(streamToDestroy);
+                    }
+                    catch
+                    {
+                        // swallow exceptions in finalizer
+                    }
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
     }
 }

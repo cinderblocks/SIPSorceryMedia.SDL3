@@ -43,7 +43,7 @@ using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
 {
-    public class SDL3AudioSource : IAudioSource
+    public class SDL3AudioSource : IAudioSource, IDisposable
     {
         private static readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
 
@@ -63,6 +63,8 @@ namespace SIPSorceryMedia.SDL3
         private readonly BackgroundWorker backgroundWorker;
 
         private AudioSamplingRatesEnum audioSamplingRates;
+
+        private bool _disposed = false;
 
 #region EVENT
 
@@ -93,6 +95,11 @@ namespace SIPSorceryMedia.SDL3
             backgroundWorker.WorkerSupportsCancellation = true;
         }
 
+        ~SDL3AudioSource()
+        {
+            Dispose(false);
+        }
+
         private void RaiseAudioSourceError(string err)
         {
             CloseAudio();
@@ -103,7 +110,7 @@ namespace SIPSorceryMedia.SDL3
         {
             var pool = ArrayPool<byte>.Shared;
 
-            while (!backgroundWorker.CancellationPending)
+            while (!backgroundWorker.CancellationPending && !_disposed)
             {
                 int size = 0;
                 int bufferSize = 0;
@@ -159,7 +166,7 @@ namespace SIPSorceryMedia.SDL3
 
                         size -= bufferSize;
                     }
-                } while (size >= frameSize);
+                } while (size >= frameSize && !_disposed);
 
                 SDL3Helper.Delay(16);
             }
@@ -320,6 +327,59 @@ namespace SIPSorceryMedia.SDL3
             }
 
             return Task.CompletedTask;
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            if (disposing)
+            {
+                // dispose managed
+                try
+                {
+                    // stop background worker gracefully
+                    if (backgroundWorker.IsBusy)
+                    {
+                        backgroundWorker.CancelAsync();
+                    }
+
+                    CloseAudio().Wait();
+                }
+                catch (Exception ex)
+                {
+                    log.LogError(ex, "Error during Dispose CloseAudio");
+                }
+            }
+            else
+            {
+                // finalizer: best-effort unmanaged cleanup without touching managed state
+                IntPtr streamToDestroy = IntPtr.Zero;
+                lock (_stateLock)
+                {
+                    streamToDestroy = _audioStream;
+                    _audioStream = IntPtr.Zero;
+                }
+
+                if (streamToDestroy != IntPtr.Zero)
+                {
+                    try
+                    {
+                        SDL3Helper.DestroyAudioStream(streamToDestroy);
+                    }
+                    catch
+                    {
+                        // swallow exceptions in finalizer
+                    }
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
         public List<AudioFormat> GetAudioSourceFormats()
