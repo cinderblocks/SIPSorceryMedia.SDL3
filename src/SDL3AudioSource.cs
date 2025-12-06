@@ -33,13 +33,14 @@
  */
 
 using Microsoft.Extensions.Logging;
+using SDL3;
 using SIPSorceryMedia.Abstractions;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Threading.Channels;
+using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
 {
@@ -89,11 +90,20 @@ namespace SIPSorceryMedia.SDL3
         {
             if (audioEncoder == null)
                 throw new ApplicationException("Audio encoder provided is null");
-            var device = SDL3Helper.GetAudioRecordingDevice(audioInDeviceName);
-            if (!device.HasValue)
-                throw new ApplicationException($"Could not get audio recording device {audioInDeviceName}");
 
-            _audioDevice = device.Value;
+            if (string.IsNullOrEmpty(audioInDeviceName))
+            {
+                _audioDevice = (SDL.SDL_AUDIO_DEVICE_DEFAULT_RECORDING, "Default Microphone");
+            }
+            else
+            {
+                var device = SDL3Helper.GetAudioPlaybackDevice(audioInDeviceName!);
+                if (!device.HasValue)
+                {
+                    throw new ApplicationException($"Could not get audio device named '{audioInDeviceName}'");
+                }
+                _audioDevice = device.Value;
+            }
 
             _audioFormatManager = new MediaFormatManager<AudioFormat>(audioEncoder.SupportedFormats);
             _audioEncoder = audioEncoder;
@@ -125,7 +135,7 @@ namespace SIPSorceryMedia.SDL3
                     if (_callbackTask == null || _callbackTask.IsCompleted)
                     {
                         _callbackCts = new CancellationTokenSource();
-                        _callbackTask = Task.Run(() => CallbackWorkerLoopAsync(_callbackCts.Token));
+                        _callbackTask = Task.Run(() => CallbackWorkerLoopAsync(_callbackCts.Token), ct);
                     }
 
                     try { await Task.Delay(16, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
@@ -133,7 +143,6 @@ namespace SIPSorceryMedia.SDL3
                 }
 
                 int size = 0;
-                int bufferSize = 0;
 
                 do
                 {
@@ -151,12 +160,11 @@ namespace SIPSorceryMedia.SDL3
                         return;
                     }
 
-                    IntPtr streamPtr = IntPtr.Zero;
                     bool added = false;
                     try
                     {
                         currentHandle.DangerousAddRef(ref added);
-                        streamPtr = currentHandle.DangerousGetHandle();
+                        var streamPtr = currentHandle.DangerousGetHandle();
                         size = SDL3Helper.GetAudioStreamQueued(streamPtr);
                     }
                     finally
@@ -166,18 +174,17 @@ namespace SIPSorceryMedia.SDL3
 
                     if (size >= frameSize * 2)
                     {
-                        bufferSize = frameSize != 0 ? frameSize * 2 : size;
+                        var bufferSize = frameSize != 0 ? frameSize * 2 : size;
 
                         byte[] buf = pool.Rent(bufferSize);
 
                         try
                         {
-                            IntPtr readPtr = IntPtr.Zero;
                             bool add2 = false;
                             try
                             {
                                 currentHandle.DangerousAddRef(ref add2);
-                                readPtr = currentHandle.DangerousGetHandle();
+                                var readPtr = currentHandle.DangerousGetHandle();
                                 // Read directly into managed buffer to avoid unsafe fixed in async method
                                 SDL3Helper.GetAudioStreamData(readPtr, buf, bufferSize);
                             }

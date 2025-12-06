@@ -356,7 +356,7 @@ public static unsafe partial class SDL
     public static extern SDLBool SDL_OutOfMemory();
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] 
-    private static extern string SDL_GetError();
+    public static extern string SDL_GetError();
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_ClearError();
@@ -992,7 +992,7 @@ public static unsafe partial class SDL
     public static extern void SDL_DestroyAudioStream(IntPtr stream);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr SDL_OpenAudioDeviceStream(uint devid, ref SDL_AudioSpec spec, SDL_AudioStreamCallback callback, IntPtr userdata);
+    public static extern IntPtr SDL_OpenAudioDeviceStream(uint devid, ref SDL_AudioSpec spec, SDL_AudioStreamCallback? callback, IntPtr userdata);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void SDL_AudioPostmixCallback(IntPtr userdata, SDL_AudioSpec* spec, float* buffer, int buflen);
