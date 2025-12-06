@@ -35,8 +35,12 @@
 using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
+using System.Buffers;
+using System.ComponentModel;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
@@ -62,6 +66,11 @@ namespace SIPSorceryMedia.SDL3
 
         public event SourceErrorDelegate ? OnAudioSinkError = null;
 
+        // Playback queue populated by producers; worker will dequeue and call SDL to put data into stream
+        private readonly ConcurrentQueue<(byte[] Buffer, int Length)> _playbackQueue = new ConcurrentQueue<(byte[] Buffer, int Length)>();
+        private readonly SemaphoreSlim _playbackSemaphore = new SemaphoreSlim(0);
+        private readonly BackgroundWorker _playbackWorker;
+
         /// <summary>
         /// Creates a new basic RTP session that captures and renders audio to/from the system devices.
         /// </summary>
@@ -79,6 +88,10 @@ namespace SIPSorceryMedia.SDL3
                 throw new ApplicationException($"Could not get audio recording device named {audioOutDeviceName}");
             }
             _audioDevice = device.Value;
+
+            _playbackWorker = new BackgroundWorker();
+            _playbackWorker.DoWork += PlaybackWorker_DoWork;
+            _playbackWorker.WorkerSupportsCancellation = true;
         }
 
         ~SDL3AudioEndPoint()
@@ -161,7 +174,77 @@ namespace SIPSorceryMedia.SDL3
 
         private void FeedStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
         {
-            //throw new NotImplementedException();
+            try
+            {
+                // Callback invoked by SDL when the audio device stream reports space/need.
+                // We keep this callback non-blocking: capture current stream handle and log queued bytes.
+                IntPtr currentStream;
+                lock (_stateLock)
+                {
+                    currentStream = _audioStream;
+                }
+
+                if (currentStream == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                // Log debug info for diagnostics. Do not perform heavy work here.
+                int queued = SDL3Helper.GetAudioStreamQueued(currentStream);
+                log.LogDebug("[FeedStreamCallback] DeviceId:{DeviceId} additionalAmount:{Additional} totalAmount:{Total} queued:{Queued}", _audioDevice.id, additionalAmount, totalAmount, queued);
+
+                // Signal worker that space is available
+                if (additionalAmount > 0)
+                {
+                    try { _playbackSemaphore.Release(); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "[FeedStreamCallback] Exception in audio stream callback");
+            }
+        }
+
+        private void PlaybackWorker_DoWork(object? sender, DoWorkEventArgs e)
+        {
+            var pool = ArrayPool<byte>.Shared;
+
+            while (!_playbackWorker.CancellationPending && !_disposed)
+            {
+                // Wait for available buffer or timeout
+                _playbackSemaphore.Wait(50);
+
+                while (_playbackQueue.TryDequeue(out var seg))
+                {
+                    IntPtr stream;
+                    lock (_stateLock)
+                    {
+                        stream = _audioStream;
+                    }
+
+                    if (stream == IntPtr.Zero)
+                    {
+                        // return buffer
+                        try { pool.Return(seg.Buffer); } catch { }
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Put bytes into SDL stream
+                        SDL3Helper.PutAudioToStream(stream, ref seg.Buffer, seg.Length);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.LogError(ex, "PlaybackWorker: error putting audio to stream");
+                    }
+                    finally
+                    {
+                        // Return buffer to pool
+                        try { pool.Return(seg.Buffer); } catch { }
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -170,16 +253,18 @@ namespace SIPSorceryMedia.SDL3
         /// <param name="pcmSample">Raw PCM sample from remote party.</param>
         public void PutAudioSample(byte[] pcmSample)
         {
-            IntPtr stream;
-            lock (_stateLock)
-            {
-                stream = _audioStream;
-            }
+            if (pcmSample == null || pcmSample.Length == 0) return;
 
-            if (stream != IntPtr.Zero)
-            {
-                SDL3Helper.PutAudioToStream(stream, ref pcmSample, pcmSample.Length);
-            }
+            // Rent a buffer and copy data to avoid producers holding onto arrays and to reuse buffers
+            var pool = ArrayPool<byte>.Shared;
+            var buf = pool.Rent(pcmSample.Length);
+            Buffer.BlockCopy(pcmSample, 0, buf, 0, pcmSample.Length);
+
+            // Enqueue for playback worker
+            _playbackQueue.Enqueue((buf, pcmSample.Length));
+
+            // Signal worker
+            try { _playbackSemaphore.Release(); } catch { }
         }
 
         [Obsolete("Use GotEncodeMediaFrame instead.")]
@@ -217,6 +302,10 @@ namespace SIPSorceryMedia.SDL3
 
             if (doPause && stream != IntPtr.Zero)
             {
+                // stop worker
+                if (_playbackWorker.IsBusy)
+                    _playbackWorker.CancelAsync();
+
                 SDL3Helper.PauseAudioStreamDevice(stream);
                 log.LogDebug("[PauseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
@@ -241,6 +330,9 @@ namespace SIPSorceryMedia.SDL3
 
             if (doResume && stream != IntPtr.Zero)
             {
+                if (!_playbackWorker.IsBusy)
+                    _playbackWorker.RunWorkerAsync();
+
                 SDL3Helper.ResumeAudioStreamDevice(stream);
                 log.LogDebug("[ResumeAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
@@ -303,6 +395,13 @@ namespace SIPSorceryMedia.SDL3
                 log.LogDebug("[CloseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
 
+            // clear any queued buffers
+            var pool = ArrayPool<byte>.Shared;
+            while (_playbackQueue.TryDequeue(out var seg))
+            {
+                try { pool.Return(seg.Buffer); } catch { }
+            }
+
             return Task.CompletedTask;
         }
 
@@ -317,6 +416,13 @@ namespace SIPSorceryMedia.SDL3
                 try
                 {
                     CloseAudioSink().Wait();
+
+                    // dispose worker and semaphore
+                    if (_playbackWorker.IsBusy)
+                    {
+                        _playbackWorker.CancelAsync();
+                    }
+                    _playbackSemaphore?.Dispose();
                 }
                 catch (Exception ex)
                 {

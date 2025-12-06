@@ -104,6 +104,9 @@ namespace SIPSorceryMedia.SDL3
                 SDL_PutAudioStreamData(stream, (IntPtr)ptr, len);
         }
 
+        // Wrapper to read data from an audio stream
+        public static unsafe int GetAudioStreamData(IntPtr stream, IntPtr buf, int len) => SDL_GetAudioStreamData(stream, buf, len);
+
         public static void InitSDL(SDL_InitFlags flags = SDL_InitFlags.SDL_INIT_AUDIO | SDL_InitFlags.SDL_INIT_TIMER)
         {
             if (_sdl3Initialised) { return; }

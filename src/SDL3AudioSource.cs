@@ -36,9 +36,11 @@ using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
@@ -65,6 +67,13 @@ namespace SIPSorceryMedia.SDL3
         private AudioSamplingRatesEnum audioSamplingRates;
 
         private bool _disposed = false;
+
+        // When true the SDL audio stream callback will provide data; background worker should not pull data.
+        private volatile bool _useStreamCallbackReading = false;
+
+        // queue populated by the SDL callback; worker will consume and return buffers to pool
+        private readonly ConcurrentQueue<(byte[] Buffer, int Length)> _callbackQueue = new ConcurrentQueue<(byte[] Buffer, int Length)>();
+        private readonly SemaphoreSlim _queueSemaphore = new SemaphoreSlim(0);
 
 #region EVENT
 
@@ -112,6 +121,44 @@ namespace SIPSorceryMedia.SDL3
 
             while (!backgroundWorker.CancellationPending && !_disposed)
             {
+                // If we're using the SDL callback to unqueue, the background worker should process queued buffers.
+                if (_useStreamCallbackReading)
+                {
+                    // Wait for a buffer to be available or timeout to re-check cancellation
+                    _queueSemaphore.Wait(50);
+
+                    while (_callbackQueue.TryDequeue(out var seg))
+                    {
+                        try
+                        {
+                            int read = seg.Length;
+                            int shortCount = read / sizeof(short);
+                            short[] pcm = new short[shortCount];
+                            Buffer.BlockCopy(seg.Buffer, 0, pcm, 0, shortCount * sizeof(short));
+
+                            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
+
+                            if (OnAudioSourceEncodedSample != null)
+                            {
+                                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
+                                if (encodedSample.Length > 0)
+                                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            log.LogError(ex, "Error processing queued audio buffer");
+                        }
+                        finally
+                        {
+                            // Return buffer to pool
+                            pool.Return(seg.Buffer);
+                        }
+                    }
+
+                    continue;
+                }
+
                 int size = 0;
                 int bufferSize = 0;
                 do
@@ -143,7 +190,8 @@ namespace SIPSorceryMedia.SDL3
                         {
                             fixed (byte* ptr = &buf[0])
                             {
-                                SDL3Helper.PutAudio(stream, (IntPtr)ptr, bufferSize);
+                                // Read from SDL audio stream into our buffer
+                                SDL3Helper.GetAudioStreamData(stream, (IntPtr)ptr, bufferSize);
 
                                 int shortCount = bufferSize / sizeof(short);
                                 short[] pcm = new short[shortCount];
@@ -194,6 +242,9 @@ namespace SIPSorceryMedia.SDL3
                     _audioStream = stream;
                 }
 
+                // when we open with UnqueueStreamCallback, indicate we will use callback reading
+                _useStreamCallbackReading = stream != IntPtr.Zero;
+
                 if (stream != IntPtr.Zero)
                     log.LogDebug("[InitRecordingDevice] Audio source - Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
@@ -209,9 +260,45 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
-        private void UnqueueStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
+        private unsafe void UnqueueStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
         {
-            //throw new NotImplementedException();
+            // This callback is invoked by SDL when new data is available on the recording stream.
+            // We should read 'additionalAmount' bytes (or however many are available) and enqueue them for processing.
+            if (stream == IntPtr.Zero || additionalAmount <= 0)
+            {
+                return;
+            }
+
+            var pool = ArrayPool<byte>.Shared;
+            int toRead = additionalAmount;
+            byte[] rented = pool.Rent(toRead);
+
+            int read = 0;
+            try
+            {
+                fixed (byte* ptr = &rented[0])
+                {
+                    read = SDL3Helper.GetAudioStreamData(stream, (IntPtr)ptr, toRead);
+                }
+
+                if (read <= 0)
+                {
+                    pool.Return(rented);
+                    return;
+                }
+
+                // Enqueue the rented buffer along with the number of valid bytes. The background worker will return it to the pool.
+                _callbackQueue.Enqueue((rented, read));
+                _queueSemaphore.Release();
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "UnqueueStreamCallback: error reading audio stream");
+                if (rented != null)
+                {
+                    pool.Return(rented);
+                }
+            }
         }
 
         public Task PauseAudio()
@@ -278,19 +365,11 @@ namespace SIPSorceryMedia.SDL3
 
         public Task StartAudio()
         {
-            bool needResume = false;
-            lock (_stateLock)
+            if (!_isStarted && _audioStream != IntPtr.Zero)
             {
-                if (!_isStarted && _audioStream != IntPtr.Zero)
-                {
-                    _isStarted = true;
-                    _isPaused = true;
-                    needResume = true;
-                }
-            }
+                _isStarted = true;
+                _isPaused = true;
 
-            if (needResume)
-            {
                 ResumeAudio().Wait();
             }
 
@@ -299,31 +378,22 @@ namespace SIPSorceryMedia.SDL3
 
         public Task CloseAudio()
         {
-            // Ensure audio paused first
-            PauseAudio().Wait();
-
-            IntPtr streamToDestroy = IntPtr.Zero;
-
-            lock (_stateLock)
+            if (_isStarted)
             {
-                streamToDestroy = _audioStream;
-                _audioStream = IntPtr.Zero;
-                _isStarted = false;
-                _isPaused = true;
-            }
-
-            if (streamToDestroy != IntPtr.Zero)
-            {
-                try
+                PauseAudio().Wait();
+                if (_audioStream != IntPtr.Zero)
                 {
-                    SDL3Helper.DestroyAudioStream(streamToDestroy);
+                    SDL3Helper.DestroyAudioStream(_audioStream);
                     log.LogDebug("[CloseAudio] Audio source - Id:[{AudioInDeviceId}] - Name:[{AudioInDeviceName}]", 
                         _audioDevice.id, _audioDevice.name);
                 }
-                catch (Exception ex)
-                {
-                    log.LogError(ex, "Error destroying audio stream");
-                }
+            }
+
+            lock (_stateLock)
+            {
+                _isStarted = false;
+                _audioStream = IntPtr.Zero;
+                _useStreamCallbackReading = false;
             }
 
             return Task.CompletedTask;
@@ -346,6 +416,16 @@ namespace SIPSorceryMedia.SDL3
                     }
 
                     CloseAudio().Wait();
+
+                    // Dispose semaphore
+                    _queueSemaphore?.Dispose();
+
+                    // Return any remaining buffers in queue
+                    var pool = ArrayPool<byte>.Shared;
+                    while (_callbackQueue.TryDequeue(out var seg))
+                    {
+                        try { pool.Return(seg.Buffer); } catch { }
+                    }
                 }
                 catch (Exception ex)
                 {
