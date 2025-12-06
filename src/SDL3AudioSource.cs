@@ -78,10 +78,10 @@ namespace SIPSorceryMedia.SDL3
 
 #region EVENT
 
-        public event EncodedSampleDelegate? OnAudioSourceEncodedSample = null;
-        public event RawAudioSampleDelegate? OnAudioSourceRawSample = null;
-        public event SourceErrorDelegate? OnAudioSourceError = null;
-        public event Action<EncodedAudioFrame>? OnAudioSourceEncodedFrameReady = null;
+        public event EncodedSampleDelegate OnAudioSourceEncodedSample = null;
+        public event RawAudioSampleDelegate OnAudioSourceRawSample = null;
+        public event SourceErrorDelegate OnAudioSourceError = null;
+        public event Action<EncodedAudioFrame> OnAudioSourceEncodedFrameReady = null;
 
 #endregion EVENT
 
@@ -108,7 +108,8 @@ namespace SIPSorceryMedia.SDL3
 
         private void RaiseAudioSourceError(string err)
         {
-            CloseAudio();
+            // fire-and-forget close
+            _ = CloseAudioAsync();
             OnAudioSourceError?.Invoke(err);
         }
 
@@ -144,7 +145,9 @@ namespace SIPSorceryMedia.SDL3
 
                     if (currentHandle == null || currentHandle.IsInvalid)
                     {
-                        RaiseAudioSourceError($"SDLAudioSource [{_audioDevice.name}] stopped.");
+                        // fire-and-forget close
+                        _ = CloseAudioAsync();
+                        OnAudioSourceError?.Invoke($"SDLAudioSource [{_audioDevice.name}] stopped.");
                         return;
                     }
 
@@ -214,7 +217,7 @@ namespace SIPSorceryMedia.SDL3
             try
             {
                 // Stop previous recording device
-                CloseAudio();
+                _ = CloseAudioAsync();
 
                 // Init recording device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
@@ -245,13 +248,15 @@ namespace SIPSorceryMedia.SDL3
                 else
                 {
                     log.LogError("[InitRecordingDevice] SDLAudioSource failed to initialise device. No audio device found with [{AudioDeviceId} ] and [ {AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
-                    RaiseAudioSourceError($"SDLAudioSource failed to initialise device. No audio device found with [{_audioDevice.id} ] and [ {_audioDevice.name}]");
+                    _ = CloseAudioAsync();
+                    OnAudioSourceError?.Invoke($"SDLAudioSource failed to initialise device. No audio device found with [{_audioDevice.id} ] and [ {_audioDevice.name}]");
                 }
             }
             catch (Exception ex)
             {
                 log.LogError(ex, "InitRecordingDevice] SDLAudioSource failed to initialise device [{AudioDeviceId} ] - [ {AudioDeviceName}].", _audioDevice.id, _audioDevice.name);
-                RaiseAudioSourceError($"SDLAudioSource failed to initialise device [{_audioDevice.name}] and [{_audioDevice.id}] - Exception:[{ex.Message}]");
+                _ = CloseAudioAsync();
+                OnAudioSourceError?.Invoke($"SDLAudioSource failed to initialise device [{_audioDevice.name}] and [{_audioDevice.id}] - Exception:[{ex.Message}]");
             }
         }
 
@@ -382,6 +387,11 @@ namespace SIPSorceryMedia.SDL3
                 }
             }
 
+            return ResumeAudioInternal(doResume, currentHandle);
+        }
+
+        private Task ResumeAudioInternal(bool doResume, SDL3AudioStreamSafeHandle? currentHandle)
+        {
             if (doResume && currentHandle != null && !currentHandle.IsInvalid)
             {
                 if (_mainTask == null || _mainTask.IsCompleted)
@@ -398,32 +408,32 @@ namespace SIPSorceryMedia.SDL3
             return Task.CompletedTask;
         }
 
-        public bool IsAudioSourcePaused()
+        public Task StartAudio()
         {
-            lock (_stateLock)
-            {
-                return _isPaused;
-            }
+            return StartAudioAsync();
         }
 
-        public Task StartAudio()
+        public async Task StartAudioAsync()
         {
             if (!_isStarted && _audioStream != null && !_audioStream.IsInvalid)
             {
                 _isStarted = true;
                 _isPaused = true;
 
-                ResumeAudio().Wait();
+                await ResumeAudio();
             }
-
-            return Task.CompletedTask;
         }
 
         public Task CloseAudio()
         {
+            return CloseAudioAsync();
+        }
+
+        public async Task CloseAudioAsync()
+        {
             if (_isStarted)
             {
-                PauseAudio().Wait();
+                await PauseAudio();
                 if (_audioStream != null && !_audioStream.IsInvalid)
                 {
                     try
@@ -446,10 +456,7 @@ namespace SIPSorceryMedia.SDL3
                 _useStreamCallbackReading = false;
             }
 
-            // cancel main task without blocking
             try { _mainCts?.Cancel(); } catch { }
-
-            return Task.CompletedTask;
         }
 
         protected virtual void Dispose(bool disposing)
@@ -466,7 +473,8 @@ namespace SIPSorceryMedia.SDL3
                     try { _mainCts?.Cancel(); } catch { }
                     try { _callbackCts?.Cancel(); } catch { }
 
-                    CloseAudio().Wait();
+                    // fire-and-forget close
+                    _ = CloseAudio();
 
                     _callbackCts?.Dispose();
                     _mainCts?.Dispose();
@@ -503,12 +511,18 @@ namespace SIPSorceryMedia.SDL3
 
         public void SetAudioSourceFormat(AudioFormat audioFormat)
         {
+            // Fire-and-forget async version to avoid blocking callers expecting synchronous API.
+            _ = SetAudioSourceFormatAsync(audioFormat);
+        }
+
+        public async Task SetAudioSourceFormatAsync(AudioFormat audioFormat)
+        {
             log.LogDebug("Setting audio source format to {AudioFormatFormatId}:{AudioFormatFormatName} {AudioFormatClockRate}.", 
                 audioFormat.FormatID, audioFormat.FormatName, audioFormat.ClockRate);
             _audioFormatManager.SetSelectedFormat(audioFormat);
-
+ 
             InitRecordingDevice();
-            StartAudio();
+            await StartAudio();
         }
 
         public void RestrictFormats(Func<AudioFormat, bool> filter)
@@ -520,5 +534,13 @@ namespace SIPSorceryMedia.SDL3
             => throw new NotImplementedException();
 
         public bool HasEncodedAudioSubscribers() => OnAudioSourceEncodedSample != null;
+
+        public bool IsAudioSourcePaused()
+        {
+            lock (_stateLock)
+            {
+                return _isPaused;
+            }
+        }
     }
 }

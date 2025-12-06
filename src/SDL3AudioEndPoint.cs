@@ -100,10 +100,15 @@ namespace SIPSorceryMedia.SDL3
 
         private void RaiseAudioSinkError(string err)
         {
-            CloseAudioSink();
+            _ = CloseAudioSinkAsync();
             OnAudioSinkError?.Invoke(err);
         }
 
+        /// <summary>
+        /// Called when an encoded audio frame has been received. The frame will be decoded
+        /// and queued for playback on the endpoint.
+        /// </summary>
+        /// <param name="encodedMediaFrame">The encoded audio frame to decode and play.</param>
         public void GotEncodedMediaFrame(EncodedAudioFrame encodedMediaFrame)
         {
             var audioFormat = encodedMediaFrame.AudioFormat;
@@ -119,8 +124,16 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
+        /// <summary>
+        /// Restrict the available audio formats for this endpoint using the provided filter.
+        /// </summary>
+        /// <param name="filter">A predicate used to select allowed audio formats.</param>
         public void RestrictFormats(Func<AudioFormat, bool> filter) => _audioFormatManager.RestrictFormats(filter);
 
+        /// <summary>
+        /// Sets the audio format to use for playback and initializes the playback device.
+        /// </summary>
+        /// <param name="audioFormat">The desired audio format.</param>
         public void SetAudioSinkFormat(AudioFormat audioFormat)
         {
             _audioFormatManager.SetSelectedFormat(audioFormat);
@@ -128,8 +141,16 @@ namespace SIPSorceryMedia.SDL3
             StartAudioSink();
         }
 
+        /// <summary>
+        /// Gets the list of available audio sink formats supported by the encoder.
+        /// </summary>
+        /// <returns>A list of supported audio formats.</returns>
         public List<AudioFormat> GetAudioSinkFormats() => _audioFormatManager.GetSourceFormats();
 
+        /// <summary>
+        /// Returns this endpoint wrapped in a <see cref="MediaEndPoints"/> instance.
+        /// </summary>
+        /// <returns>A <see cref="MediaEndPoints"/> containing this audio sink.</returns>
         public MediaEndPoints ToMediaEndPoints()
         {
             return new MediaEndPoints
@@ -142,8 +163,8 @@ namespace SIPSorceryMedia.SDL3
         {
             try
             {
-                // Stop previous playback device
-                CloseAudioSink();
+                // Stop previous playback device (async close, don't block caller)
+                _ = CloseAudioSinkAsync();
 
                 // Init Playback device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
@@ -257,9 +278,9 @@ namespace SIPSorceryMedia.SDL3
         }
 
         /// <summary>
-        /// Event handler for playing audio samples received from the remote call party.
+        /// Queues a raw PCM audio sample for playback.
         /// </summary>
-        /// <param name="pcmSample">Raw PCM sample from remote party.</param>
+        /// <param name="pcmSample">A buffer containing raw PCM audio bytes.</param>
         public void PutAudioSample(byte[] pcmSample)
         {
             if (pcmSample == null || pcmSample.Length == 0) return;
@@ -277,6 +298,11 @@ namespace SIPSorceryMedia.SDL3
         }
 
         [Obsolete("Use GotEncodeMediaFrame instead.")]
+        /// <summary>
+        /// Obsolete: Handle a received RTP audio payload. This method decodes the RTP
+        /// payload using the selected audio format and queues it for playback.
+        /// </summary>
+        /// <remarks>Use <see cref="GotEncodedMediaFrame(EncodedAudioFrame)"/> instead.</remarks>
         public void GotAudioRtp(IPEndPoint remoteEndPoint, uint ssrc, uint seqnum, uint timestamp, int payloadID, bool marker, byte[] payload)
         {
             SDL3AudioStreamSafeHandle? currentHandle;
@@ -294,6 +320,14 @@ namespace SIPSorceryMedia.SDL3
             PutAudioSample(pcmBytes);
         }
 
+        /// <summary>
+        /// Pause audio sink operation.
+        /// </summary>
+        /// <remarks>
+        /// This synchronous API returns a completed Task. Prefer using the async counterpart
+        /// `PauseAudioSinkAsync` when calling from asynchronous code to avoid blocking or
+        /// surprising synchronous behavior.
+        /// </remarks>
         public Task PauseAudioSink()
         {
             SDL3AudioStreamSafeHandle? currentHandle = null;
@@ -322,6 +356,14 @@ namespace SIPSorceryMedia.SDL3
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Resume audio sink operation.
+        /// </summary>
+        /// <remarks>
+        /// This synchronous API returns a completed Task. Prefer using the async counterpart
+        /// `ResumeAudioSinkAsync` when calling from asynchronous code to avoid blocking or
+        /// surprising synchronous behavior.
+        /// </remarks>
         public Task ResumeAudioSink()
         {
             SDL3AudioStreamSafeHandle? currentHandle = null;
@@ -349,7 +391,20 @@ namespace SIPSorceryMedia.SDL3
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Starts the audio sink. This synchronous wrapper forwards to <see cref="StartAudioSinkAsync"/>.
+        /// </summary>
+        /// <returns>A <see cref="Task"/> representing the start operation.</returns>
         public Task StartAudioSink()
+        {
+            return StartAudioSinkAsync();
+        }
+
+        /// <summary>
+        /// Asynchronously starts the audio sink and resumes playback if required.
+        /// </summary>
+        /// <returns>A <see cref="Task"/> that completes when the operation has been initiated.</returns>
+        public async Task StartAudioSinkAsync()
         {
             bool needResume = false;
             lock (_stateLock)
@@ -366,16 +421,27 @@ namespace SIPSorceryMedia.SDL3
             if (needResume)
             {
                 // call resume outside lock
-                ResumeAudioSink();
+                await ResumeAudioSink().ConfigureAwait(false);
             }
-
-            return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Closes the audio sink. This synchronous wrapper forwards to <see cref="CloseAudioSinkAsync"/>.
+        /// </summary>
+        /// <returns>A <see cref="Task"/> representing the close operation.</returns>
         public Task CloseAudioSink()
         {
+            return CloseAudioSinkAsync();
+        }
+
+        /// <summary>
+        /// Asynchronously closes the audio sink, disposes the underlying audio stream and clears queued buffers.
+        /// </summary>
+        /// <returns>A <see cref="Task"/> that completes when the sink has been closed.</returns>
+        public async Task CloseAudioSinkAsync()
+        {
             // Ensure audio paused first
-            PauseAudioSink().Wait();
+            await PauseAudioSink().ConfigureAwait(false);
 
             SDL3AudioStreamSafeHandle? toDispose = null;
 
@@ -409,7 +475,7 @@ namespace SIPSorceryMedia.SDL3
                 try { pool.Return(seg.Buffer); } catch { }
             }
 
-            return Task.CompletedTask;
+            return;
         }
 
         protected virtual void Dispose(bool disposing)
@@ -422,7 +488,8 @@ namespace SIPSorceryMedia.SDL3
                 // dispose managed
                 try
                 {
-                    CloseAudioSink().Wait();
+                    // Fire-and-forget close to avoid blocking Dispose
+                    _ = CloseAudioSinkAsync();
 
                     // dispose worker and semaphore
                     if (_playbackWorker.IsBusy)
@@ -442,6 +509,9 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
+        /// <summary>
+        /// Disposes the endpoint and releases managed resources.
+        /// </summary>
         public void Dispose()
         {
             Dispose(true);
