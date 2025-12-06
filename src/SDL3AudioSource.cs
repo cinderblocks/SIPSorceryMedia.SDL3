@@ -36,12 +36,10 @@ using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using System;
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Channels;
 
 namespace SIPSorceryMedia.SDL3
 {
@@ -62,18 +60,21 @@ namespace SIPSorceryMedia.SDL3
 
         private readonly int frameSize = 0;
 
-        private readonly BackgroundWorker backgroundWorker;
+        // main capture loop task
+        private CancellationTokenSource? _mainCts = null;
+        private Task? _mainTask = null;
 
         private AudioSamplingRatesEnum audioSamplingRates;
 
         private bool _disposed = false;
 
-        // When true the SDL audio stream callback will provide data; background worker should not pull data.
+        // When true the SDL audio stream callback will provide data; main loop should not pull data.
         private volatile bool _useStreamCallbackReading = false;
 
-        // queue populated by the SDL callback; worker will consume and return buffers to pool
-        private readonly ConcurrentQueue<(byte[] Buffer, int Length)> _callbackQueue = new ConcurrentQueue<(byte[] Buffer, int Length)>();
-        private readonly SemaphoreSlim _queueSemaphore = new SemaphoreSlim(0);
+        // channel populated by the SDL callback; worker will consume and return buffers to pool
+        private readonly Channel<(byte[] Buffer, int Length)> _callbackChannel = Channel.CreateUnbounded<(byte[] Buffer, int Length)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+        private CancellationTokenSource? _callbackCts = null;
+        private Task? _callbackTask = null;
 
 #region EVENT
 
@@ -98,10 +99,6 @@ namespace SIPSorceryMedia.SDL3
             _audioEncoder = audioEncoder;
 
             this.frameSize = frameSize;
-
-            backgroundWorker = new BackgroundWorker();
-            backgroundWorker.DoWork += BackgroundWorker_DoWork;
-            backgroundWorker.WorkerSupportsCancellation = true;
         }
 
         ~SDL3AudioSource()
@@ -115,55 +112,30 @@ namespace SIPSorceryMedia.SDL3
             OnAudioSourceError?.Invoke(err);
         }
 
-        private unsafe void BackgroundWorker_DoWork(object? sender, DoWorkEventArgs e)
+        private async Task MainLoopAsync(CancellationToken ct)
         {
             var pool = ArrayPool<byte>.Shared;
 
-            while (!backgroundWorker.CancellationPending && !_disposed)
+            while (!ct.IsCancellationRequested && !_disposed)
             {
-                // If we're using the SDL callback to unqueue, the background worker should process queued buffers.
+                // If we're using the SDL callback to unqueue, ensure callback task is running
                 if (_useStreamCallbackReading)
                 {
-                    // Wait for a buffer to be available or timeout to re-check cancellation
-                    _queueSemaphore.Wait(50);
-
-                    while (_callbackQueue.TryDequeue(out var seg))
+                    if (_callbackTask == null || _callbackTask.IsCompleted)
                     {
-                        try
-                        {
-                            int read = seg.Length;
-                            int shortCount = read / sizeof(short);
-                            short[] pcm = new short[shortCount];
-                            Buffer.BlockCopy(seg.Buffer, 0, pcm, 0, shortCount * sizeof(short));
-
-                            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
-
-                            if (OnAudioSourceEncodedSample != null)
-                            {
-                                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
-                                if (encodedSample.Length > 0)
-                                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            log.LogError(ex, "Error processing queued audio buffer");
-                        }
-                        finally
-                        {
-                            // Return buffer to pool
-                            pool.Return(seg.Buffer);
-                        }
+                        _callbackCts = new CancellationTokenSource();
+                        _callbackTask = Task.Run(() => CallbackWorkerLoopAsync(_callbackCts.Token));
                     }
 
+                    try { await Task.Delay(16, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
                     continue;
                 }
 
                 int size = 0;
                 int bufferSize = 0;
+
                 do
                 {
-                    // Check if device is not stopped
                     SDL3AudioStreamSafeHandle? currentHandle;
                     lock (_stateLock)
                     {
@@ -176,60 +148,52 @@ namespace SIPSorceryMedia.SDL3
                         return;
                     }
 
-                    // Safely get native handle
                     IntPtr streamPtr = IntPtr.Zero;
                     bool added = false;
                     try
                     {
                         currentHandle.DangerousAddRef(ref added);
                         streamPtr = currentHandle.DangerousGetHandle();
-
                         size = SDL3Helper.GetAudioStreamQueued(streamPtr);
                     }
                     finally
                     {
                         if (added) currentHandle.DangerousRelease();
                     }
-                    if (size >= frameSize * 2) // Need to use double size since we get byte[] and not short[] from SDL
+
+                    if (size >= frameSize * 2)
                     {
-                        if (frameSize != 0)
-                            bufferSize = frameSize * 2;
-                        else
-                            bufferSize = size;
+                        bufferSize = frameSize != 0 ? frameSize * 2 : size;
 
                         byte[] buf = pool.Rent(bufferSize);
 
                         try
                         {
-                            fixed (byte* ptr = &buf[0])
+                            IntPtr readPtr = IntPtr.Zero;
+                            bool add2 = false;
+                            try
                             {
-                                // Read from SDL audio stream into our buffer
-                                // Acquire handle again for GetAudioStreamData
-                                IntPtr readPtr = IntPtr.Zero;
-                                bool add2 = false;
-                                try
-                                {
-                                    currentHandle.DangerousAddRef(ref add2);
-                                    readPtr = currentHandle.DangerousGetHandle();
-                                    SDL3Helper.GetAudioStreamData(readPtr, (IntPtr)ptr, bufferSize);
-                                }
-                                finally
-                                {
-                                    if (add2) currentHandle.DangerousRelease();
-                                }
+                                currentHandle.DangerousAddRef(ref add2);
+                                readPtr = currentHandle.DangerousGetHandle();
+                                // Read directly into managed buffer to avoid unsafe fixed in async method
+                                SDL3Helper.GetAudioStreamData(readPtr, buf, bufferSize);
+                            }
+                            finally
+                            {
+                                if (add2) currentHandle.DangerousRelease();
+                            }
 
-                                int shortCount = bufferSize / sizeof(short);
-                                short[] pcm = new short[shortCount];
-                                Buffer.BlockCopy(buf, 0, pcm, 0, shortCount * sizeof(short));
+                            int shortCount = bufferSize / sizeof(short);
+                            short[] pcm = new short[shortCount];
+                            Buffer.BlockCopy(buf, 0, pcm, 0, shortCount * sizeof(short));
 
-                                OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
+                            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
 
-                                if (OnAudioSourceEncodedSample != null)
-                                {
-                                    var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
-                                    if (encodedSample.Length > 0)
-                                        OnAudioSourceEncodedSample?.Invoke((uint)( pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
-                                }
+                            if (OnAudioSourceEncodedSample != null)
+                            {
+                                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
+                                if (encodedSample.Length > 0)
+                                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
                             }
                         }
                         finally
@@ -239,9 +203,9 @@ namespace SIPSorceryMedia.SDL3
 
                         size -= bufferSize;
                     }
-                } while (size >= frameSize && !_disposed);
+                } while (size >= frameSize && !_disposed && !ct.IsCancellationRequested);
 
-                SDL3Helper.Delay(16);
+                try { await Task.Delay(16, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
             }
         }
 
@@ -254,11 +218,10 @@ namespace SIPSorceryMedia.SDL3
 
                 // Init recording device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
-                audioSamplingRates = audioFormat.ClockRate == AudioFormat.DEFAULT_CLOCK_RATE * 2 
+                audioSamplingRates = audioFormat.ClockRate == AudioFormat.DEFAULT_CLOCK_RATE * 2
                     ? AudioSamplingRatesEnum.Rate16KHz : AudioSamplingRatesEnum.Rate8KHz;
 
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate);
-                //int bytesPerSecond = SDL3Helper.GetBytesPerSecond(audioSpec);
 
                 var streamPtr = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
 
@@ -292,10 +255,8 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
-        private unsafe void UnqueueStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
+        private void UnqueueStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
         {
-            // This callback is invoked by SDL when new data is available on the recording stream.
-            // We should read 'additionalAmount' bytes (or however many are available) and enqueue them for processing.
             if (stream == IntPtr.Zero || additionalAmount <= 0)
             {
                 return;
@@ -308,10 +269,8 @@ namespace SIPSorceryMedia.SDL3
             int read = 0;
             try
             {
-                fixed (byte* ptr = &rented[0])
-                {
-                    read = SDL3Helper.GetAudioStreamData(stream, (IntPtr)ptr, toRead);
-                }
+                // Use helper overload that accepts managed byte[] to avoid unsafe fixed usage here
+                read = SDL3Helper.GetAudioStreamData(stream, rented, toRead);
 
                 if (read <= 0)
                 {
@@ -319,9 +278,11 @@ namespace SIPSorceryMedia.SDL3
                     return;
                 }
 
-                // Enqueue the rented buffer along with the number of valid bytes. The background worker will return it to the pool.
-                _callbackQueue.Enqueue((rented, read));
-                _queueSemaphore.Release();
+                var writer = _callbackChannel.Writer;
+                if (!writer.TryWrite((rented, read)))
+                {
+                    pool.Return(rented);
+                }
             }
             catch (Exception ex)
             {
@@ -330,6 +291,51 @@ namespace SIPSorceryMedia.SDL3
                 {
                     pool.Return(rented);
                 }
+            }
+        }
+
+        private async Task CallbackWorkerLoopAsync(CancellationToken ct)
+        {
+            var pool = ArrayPool<byte>.Shared;
+            var reader = _callbackChannel.Reader;
+
+            try
+            {
+                while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
+                {
+                    while (reader.TryRead(out var seg))
+                    {
+                        try
+                        {
+                            int read = seg.Length;
+                            int shortCount = read / sizeof(short);
+                            short[] pcm = new short[shortCount];
+                            Buffer.BlockCopy(seg.Buffer, 0, pcm, 0, shortCount * sizeof(short));
+
+                            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
+
+                            if (OnAudioSourceEncodedSample != null)
+                            {
+                                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
+                                if (encodedSample.Length > 0)
+                                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            log.LogError(ex, "Error processing queued audio buffer");
+                        }
+                        finally
+                        {
+                            pool.Return(seg.Buffer);
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "CallbackWorkerLoopAsync unexpected error");
             }
         }
 
@@ -350,8 +356,8 @@ namespace SIPSorceryMedia.SDL3
 
             if (doPause && currentHandle != null && !currentHandle.IsInvalid)
             {
-                if (backgroundWorker.IsBusy)
-                    backgroundWorker.CancelAsync();
+                // cancel main loop
+                _mainCts?.Cancel();
 
                 IntPtr ptr = currentHandle.DangerousGetHandle();
                 SDL3Helper.PauseAudioStreamDevice(ptr);
@@ -378,8 +384,11 @@ namespace SIPSorceryMedia.SDL3
 
             if (doResume && currentHandle != null && !currentHandle.IsInvalid)
             {
-                if (!backgroundWorker.IsBusy)
-                    backgroundWorker.RunWorkerAsync();
+                if (_mainTask == null || _mainTask.IsCompleted)
+                {
+                    _mainCts = new CancellationTokenSource();
+                    _mainTask = Task.Run(() => MainLoopAsync(_mainCts.Token));
+                }
 
                 IntPtr ptr = currentHandle.DangerousGetHandle();
                 SDL3Helper.ResumeAudioStreamDevice(ptr);
@@ -437,6 +446,9 @@ namespace SIPSorceryMedia.SDL3
                 _useStreamCallbackReading = false;
             }
 
+            // cancel main task without blocking
+            try { _mainCts?.Cancel(); } catch { }
+
             return Task.CompletedTask;
         }
 
@@ -450,20 +462,19 @@ namespace SIPSorceryMedia.SDL3
                 // dispose managed
                 try
                 {
-                    // stop background worker gracefully
-                    if (backgroundWorker.IsBusy)
-                    {
-                        backgroundWorker.CancelAsync();
-                    }
+                    // cancel main and callback tasks without blocking
+                    try { _mainCts?.Cancel(); } catch { }
+                    try { _callbackCts?.Cancel(); } catch { }
 
                     CloseAudio().Wait();
 
-                    // Dispose semaphore
-                    _queueSemaphore?.Dispose();
+                    _callbackCts?.Dispose();
+                    _mainCts?.Dispose();
 
-                    // Return any remaining buffers in queue
+                    // complete channel and return any queued buffers
+                    _callbackChannel.Writer.Complete();
                     var pool = ArrayPool<byte>.Shared;
-                    while (_callbackQueue.TryDequeue(out var seg))
+                    while (_callbackChannel.Reader.TryRead(out var seg))
                     {
                         try { pool.Return(seg.Buffer); } catch { }
                     }
@@ -475,8 +486,7 @@ namespace SIPSorceryMedia.SDL3
             }
             else
             {
-                // finalizer: best-effort unmanaged cleanup without touching managed state
-                // nothing: SafeHandle will free native resource when finalized
+                // finalizer: nothing - SafeHandle will free native resource when finalized
             }
         }
 

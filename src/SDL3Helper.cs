@@ -107,6 +107,15 @@ namespace SIPSorceryMedia.SDL3
         // Wrapper to read data from an audio stream
         public static unsafe int GetAudioStreamData(IntPtr stream, IntPtr buf, int len) => SDL_GetAudioStreamData(stream, buf, len);
 
+        // Overload to read directly into a managed byte[] (pins internally)
+        public static unsafe int GetAudioStreamData(IntPtr stream, byte[] buf, int len)
+        {
+            fixed (byte* ptr = &buf[0])
+            {
+                return SDL_GetAudioStreamData(stream, (IntPtr)ptr, len);
+            }
+        }
+
         public static void InitSDL(SDL_InitFlags flags = SDL_InitFlags.SDL_INIT_AUDIO | SDL_InitFlags.SDL_INIT_TIMER)
         {
             if (_sdl3Initialised) { return; }
