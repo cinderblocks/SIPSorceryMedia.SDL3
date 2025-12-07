@@ -6,9 +6,6 @@ namespace RecordThenPlayback
 {
     internal class ProgramRecordThenPlayback
     {
-        // record duration in seconds
-        private const int RECORD_SECONDS = 5;
-
         static void Main(string[] args)
         {
             Console.WriteLine("RecordThenPlayback: Starting");
