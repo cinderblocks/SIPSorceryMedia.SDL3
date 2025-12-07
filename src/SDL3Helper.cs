@@ -44,6 +44,7 @@ namespace SIPSorceryMedia.SDL3
     public class SDL3Helper
     {
         private static bool _sdl3Initialised = false;
+        private static readonly object _initLock = new object();
 
         public static bool PauseAudioStreamDevice(IntPtr stream) => SDL_PauseAudioStreamDevice(stream);
 
@@ -59,9 +60,9 @@ namespace SIPSorceryMedia.SDL3
 
         public static (uint id, string name)? GetAudioPlaybackDevice(int index) => GetAudioDevice(index, false);
 
-        public static Dictionary<uint, string> GetAudioPlaybackDevices() => GetAudioDevices(false);
+        public static IReadOnlyDictionary<uint, string> GetAudioPlaybackDevices() => GetAudioDevices(false);
 
-        public static Dictionary<uint, string> GetAudioRecordingDevices() => GetAudioDevices(true);
+        public static IReadOnlyDictionary<uint, string> GetAudioRecordingDevices() => GetAudioDevices(true);
 
         public static SDL_AudioSpec GetAudioSpec(int clockRate = AudioFormat.DEFAULT_CLOCK_RATE, byte channels = 1)
         {
@@ -100,8 +101,14 @@ namespace SIPSorceryMedia.SDL3
 
         public static unsafe void PutAudioToStream(IntPtr stream, ref byte[] data, int len)
         {
+            if (data is null) throw new ArgumentNullException(nameof(data));
+            if (len < 0 || len > data.Length) throw new ArgumentOutOfRangeException(nameof(len));
+            if (len == 0) return;
+
             fixed (byte* ptr = &data[0])
+            {
                 SDL_PutAudioStreamData(stream, (IntPtr)ptr, len);
+            }
         }
 
         // Wrapper to read data from an audio stream
@@ -110,6 +117,10 @@ namespace SIPSorceryMedia.SDL3
         // Overload to read directly into a managed byte[] (pins internally)
         public static unsafe int GetAudioStreamData(IntPtr stream, byte[] buf, int len)
         {
+            if (buf is null) throw new ArgumentNullException(nameof(buf));
+            if (len < 0 || len > buf.Length) throw new ArgumentOutOfRangeException(nameof(len));
+            if (len == 0) return 0;
+
             fixed (byte* ptr = &buf[0])
             {
                 return SDL_GetAudioStreamData(stream, (IntPtr)ptr, len);
@@ -118,40 +129,57 @@ namespace SIPSorceryMedia.SDL3
 
         public static void InitSDL(SDL_InitFlags flags = SDL_InitFlags.SDL_INIT_AUDIO | SDL_InitFlags.SDL_INIT_TIMER)
         {
-            if (_sdl3Initialised) { return; }
-
-            if (!SDL_Init(flags))
+            lock (_initLock)
             {
-                throw new ApplicationException($"Cannot initialized SDL for Audio purpose");
+                if (_sdl3Initialised) { return; }
+
+                if (!SDL_Init(flags))
+                {
+                    // Use a more specific exception type and include the SDL error if available
+                    var err = PtrToStringUtf8AndFreeWithSDL((IntPtr)0);
+                    throw new InvalidOperationException($"Cannot initialize SDL for audio: {err}");
+                }
+                _sdl3Initialised = true;
             }
-            _sdl3Initialised = true;
         }
 
         public static void QuitSDL()
         {
-            if (!_sdl3Initialised) { return; }
+            lock (_initLock)
+            {
+                if (!_sdl3Initialised) { return; }
 
-            SDL_Quit();
-            _sdl3Initialised = false;
+                SDL_Quit();
+                _sdl3Initialised = false;
+            }
         }
 
         #region PRIVATE methods
 
-        private static Dictionary<uint, string> GetAudioDevices(bool isRecording)
+        private static IReadOnlyDictionary<uint, string> GetAudioDevices(bool isRecording)
         {
-            Dictionary<uint, string> result = new Dictionary<uint, string>();
+            var result = new Dictionary<uint, string>();
 
             //Get device count
             int count;
             var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
 
-            if (count > 0)
+            if (count > 0 && devices != null)
             {
-                foreach (var device in devices)
+                for (int i = 0; i < devices.Length; i++)
                 {
-                    var name = SDL_GetAudioDeviceName(device);
-                    if (!string.IsNullOrEmpty(name))
+                    try
+                    {
+                        var device = devices[i];
+                        if (result.ContainsKey(device)) continue; // avoid duplicates
+                        var name = SDL_GetAudioDeviceName(device) ?? string.Empty;
+                        if (name.Length == 0) continue;
                         result.Add(device, name);
+                    }
+                    catch
+                    {
+                        // Ignore individual device failures and continue
+                    }
                 }
             }
             return result;
@@ -159,12 +187,14 @@ namespace SIPSorceryMedia.SDL3
 
         private static (uint id, string name)? GetAudioDevice(string startWithName, bool isRecording)
         {
+            if (string.IsNullOrWhiteSpace(startWithName)) throw new ArgumentException("Value cannot be null or whitespace.", nameof(startWithName));
+
             (uint, string)? result = null;
 
             //Get recording device count
             int count;
             var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
-            if (count > 0)
+            if (count > 0 && devices != null)
             {
                 uint defaultDevice = isRecording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
                 result = (defaultDevice, string.Empty);
@@ -173,10 +203,17 @@ namespace SIPSorceryMedia.SDL3
                 {
                     for (int i = 1; i < devices.Length; i++)
                     {
-                        var deviceName = SDL_GetAudioDeviceName(devices[i]);
-                        if (deviceName.StartsWith(startWithName, StringComparison.InvariantCultureIgnoreCase))
+                        try
                         {
-                            return (devices[i], deviceName);
+                            var deviceName = SDL_GetAudioDeviceName(devices[i]) ?? string.Empty;
+                            if (deviceName.StartsWith(startWithName, StringComparison.InvariantCultureIgnoreCase))
+                            {
+                                return (devices[i], deviceName);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore device name retrieval failures
                         }
                     }
                 }
@@ -187,18 +224,27 @@ namespace SIPSorceryMedia.SDL3
 
         private static (uint id, string name)? GetAudioDevice(int index, bool isRecording)
         {
+            if (index < 0) throw new ArgumentOutOfRangeException(nameof(index));
+
             (uint, string)? result = null;
 
             int count;
             var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
-            if (count > 0)
+            if (count > 0 && devices != null)
             {
                 uint defaultDevice = isRecording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
                 result = (defaultDevice, string.Empty);
 
-                if (index < count && index > 0)
+                if (index < count && index >= 0 && devices.Length > index)
                 {
-                    result = (devices[index], SDL_GetAudioDeviceName(devices[index]));
+                    try
+                    {
+                        result = (devices[index], SDL_GetAudioDeviceName(devices[index]) ?? string.Empty);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
                 }
             }
             return result;
