@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>SIPSorceryMedia.SDL3.Native</PackageId>
+    <Version>3.2.28</Version>
+    <Authors>Sjofn LLC</Authors>
+    <Description>Native SDL3 binaries from libsdl.org</Description>
+    <PackageTags>sdl3 native runtimes</PackageTags>
+    <PackageLicenseExpression>Zlib</PackageLicenseExpression>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="LICENSE.txt" Pack="true" PackagePath="" />
+    <None Include="runtimes\win-x64\native\SDL3.dll" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <None Include="runtimes\win-x86\native\SDL3.dll" Pack="true" PackagePath="runtimes/win-x86/native" />
+    <None Include="runtimes\win-arm64\native\SDL3.dll" Pack="true" PackagePath="runtimes/win-arm64/native" />
+    <None Include="runtimes\macos-x64\native\libSDL3.dylib" Pack="true" PackagePath="runtimes/macos-x64/native" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.txt" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

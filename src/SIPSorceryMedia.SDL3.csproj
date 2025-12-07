@@ -1,9 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
 	  <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0</TargetFrameworks>
   </PropertyGroup>
-
   <PropertyGroup>
 	<Version>8.0.12</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -17,13 +15,13 @@
 
 		Audio Codecs supported by this library: PCMU (G711), PCMA (G711), G722, G729 and Opus
 	</Description>
-    <PackageLicenseExpression>LGPL-2.1-only</PackageLicenseExpression>
+    <PackageLicenseExpression>Zlib</PackageLicenseExpression>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="SIPSorceryMedia.Abstractions" Version="8.0.12" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' or '$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Threading.Channels" Version="10.0.0" />
   </ItemGroup>
-
 </Project>
