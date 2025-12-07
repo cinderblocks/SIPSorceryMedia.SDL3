@@ -135,8 +135,10 @@ namespace SIPSorceryMedia.SDL3
 
                 if (!SDL_Init(flags))
                 {
-                    // Use a more specific exception type and include the SDL error if available
-                    var err = PtrToStringUtf8AndFreeWithSDL((IntPtr)0);
+                    // Surface the SDL error message from native side
+                    string err = null;
+                    try { err = SDL_GetError(); } catch { err = null; }
+                    if (string.IsNullOrEmpty(err)) err = "Unknown SDL error";
                     throw new InvalidOperationException($"Cannot initialize SDL for audio: {err}");
                 }
                 _sdl3Initialised = true;
