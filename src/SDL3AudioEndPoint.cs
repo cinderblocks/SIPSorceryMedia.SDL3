@@ -35,6 +35,7 @@
 using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using System;
+using System.Runtime.InteropServices;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
@@ -47,6 +48,8 @@ namespace SIPSorceryMedia.SDL3
 {
     public class SDL3AudioEndPoint : IAudioSink, IDisposable
     {
+        private const int MAX_AUDIO_RENT = 1024 * 1024; // 1MB
+
         private readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioEndPoint>();
 
         private readonly IAudioEncoder _audioEncoder;
@@ -143,7 +146,7 @@ namespace SIPSorceryMedia.SDL3
 
         /// <summary>
         /// Gets the list of available audio sink formats supported by the encoder.
-        /// </summary>
+        /// /// </summary>
         /// <returns>A list of supported audio formats.</returns>
         public List<AudioFormat> GetAudioSinkFormats() => _audioFormatManager.GetSourceFormats();
 
@@ -246,27 +249,34 @@ namespace SIPSorceryMedia.SDL3
                     if (currentHandle == null || currentHandle.IsInvalid)
                     {
                         // return buffer
-                        try { pool.Return(seg.Buffer); } catch { }
+                        try { pool.Return(seg.Buffer); } catch (Exception) { }
+                        continue;
+                    }
+
+                    // basic validation of segment
+                    if (seg.Buffer == null || seg.Length <= 0 || seg.Length > seg.Buffer.Length)
+                    {
+                        try { pool.Return(seg.Buffer); } catch (Exception) { }
                         continue;
                     }
 
                     try
                     {
-                        // Put bytes into SDL stream
-                        SDL3Helper.PutAudioToStream(currentHandle, ref seg.Buffer, seg.Length);
-                    }
-                    catch (Exception ex)
-                    {
-                        log.LogError(ex, "PlaybackWorker: error putting audio to stream");
-                    }
-                    finally
-                    {
-                        // Return buffer to pool
-                        try { pool.Return(seg.Buffer); } catch { }
-                    }
-                }
-            }
-        }
+                        // Use helper that pins buffer and calls into native safely
+                        SDL3Helper.PutAudioPinned(currentHandle, seg.Buffer, seg.Length);
+                     }
+                     catch (Exception ex)
+                     {
+                         log.LogError(ex, "PlaybackWorker: error putting audio to stream");
+                     }
+                     finally
+                     {
+                         // Return buffer to pool
+                         try { pool.Return(seg.Buffer); } catch (Exception) { }
+                     }
+                 }
+             }
+         }
 
         /// <summary>
         /// Queues a raw PCM audio sample for playback.
@@ -276,10 +286,19 @@ namespace SIPSorceryMedia.SDL3
         {
             if (pcmSample == null || pcmSample.Length == 0) return;
 
+            // defensive protection against absurdly large samples
+            if (pcmSample.Length > MAX_AUDIO_RENT)
+            {
+                log.LogWarning("PutAudioSample: sample size {Size} exceeds maximum allowed {Max}, dropping", pcmSample.Length, MAX_AUDIO_RENT);
+                return;
+            }
+
             // Rent a buffer and copy data to avoid producers holding onto arrays and to reuse buffers
             var pool = ArrayPool<byte>.Shared;
             var buf = pool.Rent(pcmSample.Length);
-            Buffer.BlockCopy(pcmSample, 0, buf, 0, pcmSample.Length);
+
+            // Copy into rented buffer using helper that pins the source briefly
+            SDL3Helper.CopyToRentedBuffer(pcmSample, buf, pcmSample.Length);
 
             // Enqueue for playback worker
             _playbackQueue.Enqueue((buf, pcmSample.Length));
@@ -449,7 +468,10 @@ namespace SIPSorceryMedia.SDL3
             {
                 try
                 {
-                    toDispose.Dispose();
+                    // Use helper to ensure native callback mapping is cleaned up then dispose
+                    try { SDL3Helper.DestroyAudioStream(toDispose); }
+                    catch (Exception) { /* fall back to dispose */ }
+                    try { toDispose.Dispose(); } catch { }
                 }
                 catch (Exception ex)
                 {
@@ -463,7 +485,7 @@ namespace SIPSorceryMedia.SDL3
             var pool = ArrayPool<byte>.Shared;
             while (_playbackQueue.TryDequeue(out var seg))
             {
-                try { pool.Return(seg.Buffer); } catch { }
+                try { pool.Return(seg.Buffer); } catch (Exception) { }
             }
 
             return;

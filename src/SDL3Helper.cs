@@ -38,6 +38,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Runtime.InteropServices;
 
 using static SDL3.SDL;
 
@@ -159,7 +160,7 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
-        public static unsafe bool PutAudioToStream(SDL3AudioStreamSafeHandle? streamHandle, ref byte[] data, int len)
+        public static bool PutAudioToStream(SDL3AudioStreamSafeHandle? streamHandle, ref byte[] data, int len)
         {
             if (data is null) throw new ArgumentNullException(nameof(data));
             if (len < 0 || len > data.Length) throw new ArgumentOutOfRangeException(nameof(len));
@@ -167,16 +168,21 @@ namespace SIPSorceryMedia.SDL3
             if (streamHandle == null || streamHandle.IsInvalid) return false;
 
             bool added = false;
+            GCHandle gch = default;
             try
             {
                 streamHandle.DangerousAddRef(ref added);
-                fixed (byte* ptr = &data[0])
-                {
-                    return SDL_PutAudioStreamData(streamHandle.DangerousGetHandle(), (IntPtr)ptr, len);
-                }
+                // Pin buffer explicitly so native can safely read from it
+                gch = GCHandle.Alloc(data, GCHandleType.Pinned);
+                IntPtr ptr = gch.AddrOfPinnedObject();
+                bool result = SDL_PutAudioStreamData(streamHandle.DangerousGetHandle(), ptr, len);
+                // ensure buffer is not collected until after native call
+                GC.KeepAlive(data);
+                return result;
             }
             finally
             {
+                if (gch.IsAllocated) gch.Free();
                 if (added) streamHandle.DangerousRelease();
             }
         }
@@ -196,7 +202,7 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
-        public static unsafe int GetAudioStreamData(SDL3AudioStreamSafeHandle? streamHandle, byte[] buf, int len)
+        public static int GetAudioStreamData(SDL3AudioStreamSafeHandle? streamHandle, byte[] buf, int len)
         {
             if (buf is null) throw new ArgumentNullException(nameof(buf));
             if (len < 0 || len > buf.Length) throw new ArgumentOutOfRangeException(nameof(len));
@@ -204,16 +210,19 @@ namespace SIPSorceryMedia.SDL3
             if (streamHandle == null || streamHandle.IsInvalid) return 0;
 
             bool added = false;
+            GCHandle gch = default;
             try
             {
                 streamHandle.DangerousAddRef(ref added);
-                fixed (byte* ptr = &buf[0])
-                {
-                    return SDL_GetAudioStreamData(streamHandle.DangerousGetHandle(), (IntPtr)ptr, len);
-                }
+                gch = GCHandle.Alloc(buf, GCHandleType.Pinned);
+                IntPtr ptr = gch.AddrOfPinnedObject();
+                int result = SDL_GetAudioStreamData(streamHandle.DangerousGetHandle(), ptr, len);
+                GC.KeepAlive(buf);
+                return result;
             }
             finally
             {
+                if (gch.IsAllocated) gch.Free();
                 if (added) streamHandle.DangerousRelease();
             }
         }
@@ -422,5 +431,38 @@ namespace SIPSorceryMedia.SDL3
         }
 
         #endregion PRIVATE methods
+
+        /// <summary>
+        /// Copy from a source buffer into a rented destination buffer while pinning the source briefly.
+        /// This centralizes pinning and ensures the source memory won't be moved during the copy.
+        /// </summary>
+        public static void CopyToRentedBuffer(byte[] source, byte[] dest, int len)
+        {
+            if (source is null) throw new ArgumentNullException(nameof(source));
+            if (dest is null) throw new ArgumentNullException(nameof(dest));
+            if (len < 0 || len > source.Length || len > dest.Length) throw new ArgumentOutOfRangeException(nameof(len));
+            if (len == 0) return;
+
+            GCHandle gch = default;
+            try
+            {
+                gch = GCHandle.Alloc(source, GCHandleType.Pinned);
+                IntPtr srcPtr = gch.AddrOfPinnedObject();
+                Marshal.Copy(srcPtr, dest, 0, len);
+                GC.KeepAlive(source);
+            }
+            finally
+            {
+                if (gch.IsAllocated) gch.Free();
+            }
+        }
+
+        /// <summary>
+        /// Convenience wrapper that pins the buffer and forwards to PutAudioToStream.
+        /// </summary>
+        public static bool PutAudioPinned(SDL3AudioStreamSafeHandle? streamHandle, byte[] data, int len)
+        {
+            return PutAudioToStream(streamHandle, ref data, len);
+        }
     }
 }

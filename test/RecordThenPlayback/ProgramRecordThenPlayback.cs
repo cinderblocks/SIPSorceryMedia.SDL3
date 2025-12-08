@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using static SDL3.SDL;
 using SIPSorceryMedia.SDL3;
 
@@ -149,35 +150,30 @@ namespace SIPSorceryMedia.SDL3
             if (stream == null || stream.IsInvalid)
                 return;
 
-            bool added = false;
+            var pool = ArrayPool<byte>.Shared;
+            byte[] rented = pool.Rent(toCopy);
             try
             {
-                stream.DangerousAddRef(ref added);
-                IntPtr nativePtr = stream.DangerousGetHandle();
-
-                if (toCopy <= tail)
+                int read = SDL3Helper.GetAudioStreamData(stream, rented, toCopy);
+                if (read <= 0)
                 {
-                    fixed (byte* dst = &_buffer[pos])
-                    {
-                        Buffer.MemoryCopy((byte*)nativePtr, dst, toCopy, toCopy);
-                    }
+                    return;
+                }
+
+                if (read <= tail)
+                {
+                    Buffer.BlockCopy(rented, 0, _buffer, pos, read);
                 }
                 else
                 {
-                    // copy tail then head (shouldn't usually happen because we stop at target)
-                    fixed (byte* dst = &_buffer[pos])
-                    {
-                        Buffer.MemoryCopy((byte*)nativePtr, dst, tail, tail);
-                    }
-                    fixed (byte* dst0 = &_buffer[0])
-                    {
-                        Buffer.MemoryCopy((byte*)nativePtr + tail, dst0, toCopy - tail, toCopy - tail);
-                    }
+                    Buffer.BlockCopy(rented, 0, _buffer, pos, tail);
+                    Buffer.BlockCopy(rented, tail, _buffer, 0, read - tail);
                 }
+                toCopy = read;
             }
             finally
             {
-                if (added) stream.DangerousRelease();
+                try { pool.Return(rented); } catch { }
             }
 
             // advance write pos and recorded count
@@ -199,17 +195,11 @@ namespace SIPSorceryMedia.SDL3
             {
                 // nothing yet or finished; zero-fill playback buffer to avoid noise
                 if (stream == null || stream.IsInvalid) return;
-                bool added = false;
                 try
                 {
-                    stream.DangerousAddRef(ref added);
-                    IntPtr nativePtr = stream.DangerousGetHandle();
-                    ZeroFillPlaybackBuffer((byte*)nativePtr, additionalAmount);
+                    ZeroFillPlaybackBuffer(stream, additionalAmount);
                 }
-                finally
-                {
-                    if (added) stream.DangerousRelease();
-                }
+                catch { }
                 return;
             }
 
@@ -220,51 +210,59 @@ namespace SIPSorceryMedia.SDL3
 
             if (stream == null || stream.IsInvalid) return;
 
-            bool added2 = false;
+            var poolOut = ArrayPool<byte>.Shared;
+            byte[] temp = poolOut.Rent(toCopy);
             try
             {
-                stream.DangerousAddRef(ref added2);
-                IntPtr nativePtr = stream.DangerousGetHandle();
-
                 if (toCopy <= tail)
                 {
-                    fixed (byte* src = &_buffer[pos])
-                    {
-                        Buffer.MemoryCopy(src, (byte*)nativePtr, toCopy, toCopy);
-                    }
+                    Buffer.BlockCopy(_buffer, pos, temp, 0, toCopy);
                 }
                 else
                 {
-                    fixed (byte* src = &_buffer[pos])
-                    {
-                        Buffer.MemoryCopy(src, (byte*)nativePtr, tail, tail);
-                    }
-                    fixed (byte* src0 = &_buffer[0])
-                    {
-                        Buffer.MemoryCopy(src0, (byte*)nativePtr + tail, toCopy - tail, toCopy - tail);
-                    }
+                    Buffer.BlockCopy(_buffer, pos, temp, 0, tail);
+                    Buffer.BlockCopy(_buffer, 0, temp, tail, toCopy - tail);
                 }
+
+                // send to native stream (helper will pin)
+                SDL3Helper.PutAudioToStream(stream, ref temp, toCopy);
 
                 int newPos = (pos + toCopy) % _targetBytes;
                 Volatile.Write(ref _readPos, newPos);
                 Interlocked.Add(ref _playedBytes, toCopy);
 
-                // If additionalAmount was larger, zero-fill the remainder to avoid playback garbage
                 if (toCopy < additionalAmount)
-                    ZeroFillPlaybackBuffer((byte*)nativePtr + toCopy, additionalAmount - toCopy);
+                {
+                    int remainder = additionalAmount - toCopy;
+                    byte[] zero = poolOut.Rent(remainder);
+                    try
+                    {
+                        Array.Clear(zero, 0, remainder);
+                        SDL3Helper.PutAudioToStream(stream, ref zero, remainder);
+                    }
+                    finally { try { poolOut.Return(zero); } catch { } }
+                }
             }
             finally
             {
-                if (added2) stream.DangerousRelease();
+                try { poolOut.Return(temp); } catch { }
             }
         }
 
-        private static void ZeroFillPlaybackBuffer(byte* dst, int length)
+        private static void ZeroFillPlaybackBuffer(SDL3AudioStreamSafeHandle? stream, int length)
         {
             if (length <= 0) return;
-            // simple zero fill
-            for (int i = 0; i < length; i++)
-                dst[i] = 0;
+            var pool = ArrayPool<byte>.Shared;
+            byte[] zero = pool.Rent(length);
+            try
+            {
+                Array.Clear(zero, 0, length);
+                SDL3Helper.PutAudioToStream(stream, ref zero, length);
+            }
+            finally
+            {
+                try { pool.Return(zero); } catch { }
+            }
         }
     }
 }

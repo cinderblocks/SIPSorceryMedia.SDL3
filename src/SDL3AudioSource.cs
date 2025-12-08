@@ -46,6 +46,7 @@ namespace SIPSorceryMedia.SDL3
 {
     public class SDL3AudioSource : IAudioSource, IDisposable
     {
+        private const int MAX_AUDIO_RENT = 1024 * 1024; // 1MB cap for rented buffers
         private static readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
 
         private readonly (uint id, string name) _audioDevice;
@@ -269,12 +270,21 @@ namespace SIPSorceryMedia.SDL3
 
             var pool = ArrayPool<byte>.Shared;
             int toRead = additionalAmount;
+            // Defensive cap to avoid abusive sizes causing huge rents
+            if (toRead <= 0) return;
+            if (toRead > MAX_AUDIO_RENT) toRead = MAX_AUDIO_RENT;
             byte[] rented = pool.Rent(toRead);
 
             int read = 0;
             try
             {
+                // Ensure stream and rented are kept alive while native call occurs
+                GC.KeepAlive(stream);
                 read = SDL3Helper.GetAudioStreamData(stream, rented, toRead);
+
+                // Safety: clamp unexpected return values
+                if (read < 0) read = 0;
+                if (read > rented.Length) read = rented.Length;
 
                 if (read <= 0)
                 {
