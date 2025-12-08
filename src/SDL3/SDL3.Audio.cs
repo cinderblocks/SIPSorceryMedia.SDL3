@@ -82,8 +82,21 @@ public static unsafe partial class SDL
         return PtrToUint32ArrayAndFreeWithSDL(p, count);
     }
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetAudioDeviceName(uint devid);
+    public static string? SDL_GetAudioDeviceName(int devId)
+    {
+        IntPtr ptr;
+        try
+        {
+            ptr = SDL_GetAudioDeviceName_Native(devId);
+        }
+        catch { return null; }
+        if (ptr == IntPtr.Zero) { return null; }
+
+        return Marshal.PtrToStringAnsi(ptr) ?? string.Empty;
+    }
+
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "SDL_GetAudioDeviceName")]
+    private static extern IntPtr SDL_GetAudioDeviceName_Native(int devId);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_GetAudioDeviceFormat(uint devid, out SDL_AudioSpec spec, out int sample_frames);

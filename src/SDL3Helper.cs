@@ -308,20 +308,22 @@ namespace SIPSorceryMedia.SDL3
         {
             var result = new Dictionary<uint, string>();
 
-            int count;
-            var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
+            var devices = isRecording ? SDL_GetAudioRecordingDevices(out var count) : SDL_GetAudioPlaybackDevices(out count);
 
-            if (count > 0 && devices != null)
+            if (count > 0)
             {
-                for (int i = 0; i < devices.Length; i++)
+                // Iterate by index for name lookup (safe) but keep device ID as dictionary key.
+                int limit = Math.Min(count, devices.Length);
+                for (int i = 0; i < limit; i++)
                 {
                     try
                     {
-                        var device = devices[i];
-                        if (result.ContainsKey(device)) continue; // avoid duplicates
-                        var name = SDL_GetAudioDeviceName(device) ?? string.Empty;
-                        if (name.Length == 0) continue;
-                        result.Add(device, name);
+                        var deviceId = devices[i];
+                        if (result.ContainsKey(deviceId)) { continue; } // avoid duplicates
+
+                        var name = SDL_GetAudioDeviceName(i) ?? string.Empty;
+                        if (name.Length == 0) { continue; }
+                        result.Add(deviceId, name);
                     }
                     catch
                     {
@@ -339,20 +341,21 @@ namespace SIPSorceryMedia.SDL3
 
             (uint, string)? result = null;
 
-            int count;
-            var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
-            if (count > 0 && devices != null)
+            var devices = isRecording ? SDL_GetAudioRecordingDevices(out var count) : SDL_GetAudioPlaybackDevices(out count);
+            if (count > 0)
             {
                 uint defaultDevice = isRecording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
                 result = (defaultDevice, string.Empty);
 
                 if (hasFilter && count > 1)
                 {
-                    for (int i = 1; i < devices.Length; i++)
+                    // Use index-based name lookup to avoid passing device-id as 'index' to native call
+                    int limit = Math.Min(count, devices.Length);
+                    for (int i = 1; i < limit; i++)
                     {
                         try
                         {
-                            var deviceName = SDL_GetAudioDeviceName(devices[i]) ?? string.Empty;
+                            var deviceName = SDL_GetAudioDeviceName(i) ?? string.Empty;
                             if (deviceName.StartsWith(startWithName, StringComparison.InvariantCultureIgnoreCase))
                             {
                                 return (devices[i], deviceName);
@@ -375,18 +378,18 @@ namespace SIPSorceryMedia.SDL3
 
             (uint, string)? result = null;
 
-            int count;
-            var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
-            if (count > 0 && devices != null)
+            var devices = isRecording ? SDL_GetAudioRecordingDevices(out var count) : SDL_GetAudioPlaybackDevices(out count);
+            if (count > 0)
             {
                 uint defaultDevice = isRecording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
                 result = (defaultDevice, string.Empty);
 
-                if (index < count && index >= 0 && devices.Length > index)
+                if (index < count && devices.Length > index)
                 {
                     try
                     {
-                        result = (devices[index], SDL_GetAudioDeviceName(devices[index]) ?? string.Empty);
+                        var name = SDL_GetAudioDeviceName(index) ?? string.Empty;
+                        result = (devices[index], name);
                     }
                     catch
                     {
