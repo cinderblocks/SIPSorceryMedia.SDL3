@@ -51,6 +51,8 @@ namespace SIPSorceryMedia.SDL3
 
         // Keep native delegate instances alive for the lifetime of the stream
         private static readonly ConcurrentDictionary<IntPtr, SDL_AudioStreamCallback> _nativeCallbacks = new();
+        // Keep managed SafeHandle-aware callbacks alive as well to make lifetime explicit
+        private static readonly ConcurrentDictionary<IntPtr, SDL_AudioStreamHandleCallback?> _managedCallbacks = new();
 
         // New managed callback that exposes SafeHandle instead of raw IntPtr
         public delegate void SDL_AudioStreamHandleCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additional_amount, int total_amount);
@@ -86,9 +88,32 @@ namespace SIPSorceryMedia.SDL3
             {
                 // keep the native callback alive keyed by the native stream pointer
                 _nativeCallbacks[ptr] = nativeCallback!;
+                // also keep the managed wrapper callback alive explicitly
+                _managedCallbacks[ptr] = callback;
             }
 
             return safeHandle;
+        }
+
+        // Encapsulate DangerousAddRef/DangerousGetHandle usage so callers don't repeat unsafe patterns.
+        private static T WithHandle<T>(SDL3AudioStreamSafeHandle? streamHandle, Func<IntPtr, T> func, T defaultValue = default)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return defaultValue;
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                var ptr = streamHandle.DangerousGetHandle();
+                return func(ptr);
+            }
+            catch
+            {
+                return defaultValue;
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
         }
 
         public static void DestroyAudioStream(SDL3AudioStreamSafeHandle? streamHandle)
@@ -96,21 +121,12 @@ namespace SIPSorceryMedia.SDL3
             if (streamHandle == null) return;
 
             // remove native callback if present
-            bool added = false;
-            try
+            WithHandle(streamHandle, ptr =>
             {
-                streamHandle.DangerousAddRef(ref added);
-                var ptr = streamHandle.DangerousGetHandle();
                 _nativeCallbacks.TryRemove(ptr, out _);
-            }
-            catch
-            {
-                // ignore
-            }
-            finally
-            {
-                if (added) streamHandle.DangerousRelease();
-            }
+                _managedCallbacks.TryRemove(ptr, out _);
+                return true;
+            });
 
             try { streamHandle.Dispose(); } catch { }
         }
@@ -118,88 +134,49 @@ namespace SIPSorceryMedia.SDL3
         public static bool PauseAudioStreamDevice(SDL3AudioStreamSafeHandle? streamHandle)
         {
             if (streamHandle == null || streamHandle.IsInvalid) return false;
-            bool added = false;
-            try
-            {
-                streamHandle.DangerousAddRef(ref added);
-                return SDL_PauseAudioStreamDevice(streamHandle.DangerousGetHandle());
-            }
-            finally
-            {
-                if (added) streamHandle.DangerousRelease();
-            }
+            return WithHandle(streamHandle, ptr => SDL_PauseAudioStreamDevice(ptr) ? true : false, false);
         }
 
         public static bool ResumeAudioStreamDevice(SDL3AudioStreamSafeHandle? streamHandle)
         {
             if (streamHandle == null || streamHandle.IsInvalid) return false;
-            bool added = false;
-            try
-            {
-                streamHandle.DangerousAddRef(ref added);
-                return SDL_ResumeAudioStreamDevice(streamHandle.DangerousGetHandle());
-            }
-            finally
-            {
-                if (added) streamHandle.DangerousRelease();
-            }
+            return WithHandle(streamHandle, ptr => SDL_ResumeAudioStreamDevice(ptr) ? true : false, false);
         }
 
         public static bool PutAudio(SDL3AudioStreamSafeHandle? streamHandle, IntPtr ptr, int bufferSize)
         {
             if (streamHandle == null || streamHandle.IsInvalid) return false;
-            bool added = false;
-            try
-            {
-                streamHandle.DangerousAddRef(ref added);
-                return SDL_PutAudioStreamData(streamHandle.DangerousGetHandle(), ptr, bufferSize);
-            }
-            finally
-            {
-                if (added) streamHandle.DangerousRelease();
-            }
+            return WithHandle(streamHandle, streamPtr => SDL_PutAudioStreamData(streamPtr, ptr, bufferSize) ? true : false, false);
         }
 
-        public static bool PutAudioToStream(SDL3AudioStreamSafeHandle? streamHandle, ref byte[] data, int len)
+        public static bool PutAudioToStream(SDL3AudioStreamSafeHandle? streamHandle, byte[] data, int len)
         {
             if (data is null) throw new ArgumentNullException(nameof(data));
             if (len < 0 || len > data.Length) throw new ArgumentOutOfRangeException(nameof(len));
             if (len == 0) return true;
-            if (streamHandle == null || streamHandle.IsInvalid) return false;
 
-            bool added = false;
-            GCHandle gch = default;
-            try
+            return WithHandle(streamHandle, streamPtr =>
             {
-                streamHandle.DangerousAddRef(ref added);
-                // Pin buffer explicitly so native can safely read from it
-                gch = GCHandle.Alloc(data, GCHandleType.Pinned);
-                IntPtr ptr = gch.AddrOfPinnedObject();
-                bool result = SDL_PutAudioStreamData(streamHandle.DangerousGetHandle(), ptr, len);
-                // ensure buffer is not collected until after native call
-                GC.KeepAlive(data);
-                return result;
-            }
-            finally
-            {
-                if (gch.IsAllocated) gch.Free();
-                if (added) streamHandle.DangerousRelease();
-            }
+                GCHandle gch = default;
+                try
+                {
+                    gch = GCHandle.Alloc(data, GCHandleType.Pinned);
+                    IntPtr dataPtr = gch.AddrOfPinnedObject();
+                    bool result = SDL_PutAudioStreamData(streamPtr, dataPtr, len);
+                    GC.KeepAlive(data);
+                    return result;
+                }
+                finally
+                {
+                    if (gch.IsAllocated) gch.Free();
+                }
+            }, false);
         }
 
         public static int GetAudioStreamData(SDL3AudioStreamSafeHandle? streamHandle, IntPtr buf, int len)
         {
             if (streamHandle == null || streamHandle.IsInvalid) return 0;
-            bool added = false;
-            try
-            {
-                streamHandle.DangerousAddRef(ref added);
-                return SDL_GetAudioStreamData(streamHandle.DangerousGetHandle(), buf, len);
-            }
-            finally
-            {
-                if (added) streamHandle.DangerousRelease();
-            }
+            return WithHandle(streamHandle, ptr => SDL_GetAudioStreamData(ptr, buf, len), 0);
         }
 
         public static int GetAudioStreamData(SDL3AudioStreamSafeHandle? streamHandle, byte[] buf, int len)
@@ -207,39 +184,29 @@ namespace SIPSorceryMedia.SDL3
             if (buf is null) throw new ArgumentNullException(nameof(buf));
             if (len < 0 || len > buf.Length) throw new ArgumentOutOfRangeException(nameof(len));
             if (len == 0) return 0;
-            if (streamHandle == null || streamHandle.IsInvalid) return 0;
 
-            bool added = false;
-            GCHandle gch = default;
-            try
+            return WithHandle(streamHandle, ptr =>
             {
-                streamHandle.DangerousAddRef(ref added);
-                gch = GCHandle.Alloc(buf, GCHandleType.Pinned);
-                IntPtr ptr = gch.AddrOfPinnedObject();
-                int result = SDL_GetAudioStreamData(streamHandle.DangerousGetHandle(), ptr, len);
-                GC.KeepAlive(buf);
-                return result;
-            }
-            finally
-            {
-                if (gch.IsAllocated) gch.Free();
-                if (added) streamHandle.DangerousRelease();
-            }
+                GCHandle gch = default;
+                try
+                {
+                    gch = GCHandle.Alloc(buf, GCHandleType.Pinned);
+                    IntPtr bufPtr = gch.AddrOfPinnedObject();
+                    int result = SDL_GetAudioStreamData(ptr, bufPtr, len);
+                    GC.KeepAlive(buf);
+                    return result;
+                }
+                finally
+                {
+                    if (gch.IsAllocated) gch.Free();
+                }
+            }, 0);
         }
 
         public static int GetAudioStreamQueued(SDL3AudioStreamSafeHandle? streamHandle)
         {
             if (streamHandle == null || streamHandle.IsInvalid) return 0;
-            bool added = false;
-            try
-            {
-                streamHandle.DangerousAddRef(ref added);
-                return SDL_GetAudioStreamQueued(streamHandle.DangerousGetHandle());
-            }
-            finally
-            {
-                if (added) streamHandle.DangerousRelease();
-            }
+            return WithHandle(streamHandle, ptr => SDL_GetAudioStreamQueued(ptr), 0);
         }
 
         public static bool IsDevicePaused(uint deviceId) => SDL_AudioDevicePaused(deviceId);
@@ -462,7 +429,7 @@ namespace SIPSorceryMedia.SDL3
         /// </summary>
         public static bool PutAudioPinned(SDL3AudioStreamSafeHandle? streamHandle, byte[] data, int len)
         {
-            return PutAudioToStream(streamHandle, ref data, len);
+            return PutAudioToStream(streamHandle, data, len);
         }
     }
 }

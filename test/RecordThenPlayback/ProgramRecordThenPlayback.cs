@@ -124,9 +124,9 @@ namespace SIPSorceryMedia.SDL3
             SDL_PauseAudioDevice(_playbackDeviceId);
             Console.WriteLine("Finished playback.");
 
-            // dispose handles
-            try { _recordingStream?.Dispose(); } catch { }
-            try { _playbackStream?.Dispose(); } catch { }
+            // dispose handles via helper to unregister callbacks
+            try { SDL3Helper.DestroyAudioStream(_recordingStream); } catch { }
+            try { SDL3Helper.DestroyAudioStream(_playbackStream); } catch { }
 
             SDL_Quit();
         }
@@ -225,7 +225,7 @@ namespace SIPSorceryMedia.SDL3
                 }
 
                 // send to native stream (helper will pin)
-                SDL3Helper.PutAudioToStream(stream, ref temp, toCopy);
+                SDL3Helper.PutAudioToStream(stream, temp, toCopy);
 
                 int newPos = (pos + toCopy) % _targetBytes;
                 Volatile.Write(ref _readPos, newPos);
@@ -238,7 +238,7 @@ namespace SIPSorceryMedia.SDL3
                     try
                     {
                         Array.Clear(zero, 0, remainder);
-                        SDL3Helper.PutAudioToStream(stream, ref zero, remainder);
+                        SDL3Helper.PutAudioToStream(stream, zero, remainder);
                     }
                     finally { try { poolOut.Return(zero); } catch { } }
                 }
@@ -257,7 +257,7 @@ namespace SIPSorceryMedia.SDL3
             try
             {
                 Array.Clear(zero, 0, length);
-                SDL3Helper.PutAudioToStream(stream, ref zero, length);
+                SDL3Helper.PutAudioToStream(stream, zero, length);
             }
             finally
             {

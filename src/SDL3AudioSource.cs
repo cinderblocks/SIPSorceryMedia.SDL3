@@ -237,8 +237,12 @@ namespace SIPSorceryMedia.SDL3
 
                  lock (_stateLock)
                  {
-                     _audioStream?.Dispose();
+                     var prev = _audioStream;
                      _audioStream = newHandle;
+                     if (prev != null)
+                     {
+                         try { SDL3Helper.DestroyAudioStream(prev); } catch { }
+                     }
                  }
 
                  // when we open with UnqueueStreamCallback, indicate we will use callback reading
@@ -445,8 +449,8 @@ namespace SIPSorceryMedia.SDL3
                 {
                     try
                     {
-                        _audioStream.Dispose();
-                        log.LogDebug("[CloseAudio] Audio source - Id:[{AudioInDeviceId}] - Name:[{AudioInDeviceName}]", 
+                        SDL3Helper.DestroyAudioStream(_audioStream);
+                        log.LogDebug("[CloseAudio] Audio source - Id:[{AudioInDeviceId}] - Name:[{AudioDeviceName}]", 
                             _audioDevice.id, _audioDevice.name);
                     }
                     catch (Exception ex)

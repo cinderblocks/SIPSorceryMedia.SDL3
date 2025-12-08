@@ -121,8 +121,8 @@ namespace PlayAudioFile
             // Free WAV file
             SDL_free(audio_buffer);
 
-            // Dispose stream handle
-            try { _streamHandle?.Dispose(); } catch { }
+            // Dispose stream handle using helper to unregister callbacks
+            try { SDL3Helper.DestroyAudioStream(_streamHandle); } catch { }
 
             // Close audio file
             CloseAudioDevice(deviceId);

@@ -178,10 +178,14 @@ namespace SIPSorceryMedia.SDL3
 
                 lock (_stateLock)
                 {
-                    // dispose previous handle if present
-                    _audioStream?.Dispose();
+                    // replace previous handle using helper that unregisters callbacks and disposes
+                    var prev = _audioStream;
                     _audioStream = newHandle;
-                }
+                    if (prev != null)
+                    {
+                        try { SDL3Helper.DestroyAudioStream(prev); } catch { }
+                    }
+                 }
 
                 if(newHandle != null && !newHandle.IsInvalid)
                     log.LogDebug("[InitPlaybackDevice] Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
@@ -468,17 +472,13 @@ namespace SIPSorceryMedia.SDL3
             {
                 try
                 {
-                    // Use helper to ensure native callback mapping is cleaned up then dispose
-                    try { SDL3Helper.DestroyAudioStream(toDispose); }
-                    catch (Exception) { /* fall back to dispose */ }
-                    try { toDispose.Dispose(); } catch { }
+                    SDL3Helper.DestroyAudioStream(toDispose);
+                    log.LogDebug("[CloseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
                 }
                 catch (Exception ex)
                 {
                     log.LogError(ex, "Error destroying audio stream");
                 }
-
-                log.LogDebug("[CloseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
 
             // clear any queued buffers
