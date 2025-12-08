@@ -261,8 +261,35 @@ namespace SIPSorceryMedia.SDL3
 
         public static int GetBytesPerSample(SDL_AudioSpec sdlAudioSpec)
         {
-            //Calculate per sample bytes
-            return sdlAudioSpec.channels * (SDL_AUDIO_BITSIZE((ushort)sdlAudioSpec.format) / 8);
+            // Determine bytes per single sample (per channel) based on format.
+            int bytesPerSingleSample;
+            switch (sdlAudioSpec.format)
+            {
+                case SDL_AudioFormat.SDL_AUDIO_U8:
+                case SDL_AudioFormat.SDL_AUDIO_S8:
+                    bytesPerSingleSample = 1;
+                    break;
+                case SDL_AudioFormat.SDL_AUDIO_S16:
+                case SDL_AudioFormat.SDL_AUDIO_S16BE:
+                    bytesPerSingleSample = 2;
+                    break;
+                case SDL_AudioFormat.SDL_AUDIO_S32:
+                case SDL_AudioFormat.SDL_AUDIO_S32BE:
+                    bytesPerSingleSample = 4;
+                    break;
+                case SDL_AudioFormat.SDL_AUDIO_F32:
+                case SDL_AudioFormat.SDL_AUDIO_F32BE:
+                    bytesPerSingleSample = 4;
+                    break;
+                case SDL_AudioFormat.SDL_AUDIO_UNKNOWN:
+                default:
+                    // Fallback: try to extract bitsize using macro; if that fails assume 2 bytes (16-bit)
+                    int bits = SDL_AUDIO_BITSIZE((ushort)sdlAudioSpec.format);
+                    bytesPerSingleSample = (bits > 0) ? (bits / 8) : 2;
+                    break;
+            }
+
+            return sdlAudioSpec.channels * bytesPerSingleSample;
         }
 
         public static int GetBytesPerSecond(SDL_AudioSpec sdlAudioSpec)
