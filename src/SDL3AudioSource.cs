@@ -164,8 +164,7 @@ namespace SIPSorceryMedia.SDL3
                     try
                     {
                         currentHandle.DangerousAddRef(ref added);
-                        var streamPtr = currentHandle.DangerousGetHandle();
-                        size = SDL3Helper.GetAudioStreamQueued(streamPtr);
+                        size = SDL3Helper.GetAudioStreamQueued(currentHandle);
                     }
                     finally
                     {
@@ -184,9 +183,8 @@ namespace SIPSorceryMedia.SDL3
                             try
                             {
                                 currentHandle.DangerousAddRef(ref add2);
-                                var readPtr = currentHandle.DangerousGetHandle();
-                                // Read directly into managed buffer to avoid unsafe fixed in async method
-                                SDL3Helper.GetAudioStreamData(readPtr, buf, bufferSize);
+                                // Read directly into managed buffer using SafeHandle overload
+                                SDL3Helper.GetAudioStreamData(currentHandle, buf, bufferSize);
                             }
                             finally
                             {
@@ -233,24 +231,19 @@ namespace SIPSorceryMedia.SDL3
 
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate);
 
-                var streamPtr = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
+                // Use SafeHandle-based open
+                SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
 
-                SDL3AudioStreamSafeHandle? newHandle = null;
-                if (streamPtr != IntPtr.Zero)
-                {
-                    newHandle = new SDL3AudioStreamSafeHandle(streamPtr);
-                }
+                 lock (_stateLock)
+                 {
+                     _audioStream?.Dispose();
+                     _audioStream = newHandle;
+                 }
 
-                lock (_stateLock)
-                {
-                    _audioStream?.Dispose();
-                    _audioStream = newHandle;
-                }
+                 // when we open with UnqueueStreamCallback, indicate we will use callback reading
+                 _useStreamCallbackReading = newHandle != null && !newHandle.IsInvalid;
 
-                // when we open with UnqueueStreamCallback, indicate we will use callback reading
-                _useStreamCallbackReading = newHandle != null && !newHandle.IsInvalid;
-
-                if (streamPtr != IntPtr.Zero)
+                if (newHandle != null && !newHandle.IsInvalid)
                     log.LogDebug("[InitRecordingDevice] Audio source - Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
                 {
@@ -267,9 +260,9 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
-        private void UnqueueStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
+        private void UnqueueStreamCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
         {
-            if (stream == IntPtr.Zero || additionalAmount <= 0)
+            if (stream == null || stream.IsInvalid || additionalAmount <= 0)
             {
                 return;
             }
@@ -281,7 +274,6 @@ namespace SIPSorceryMedia.SDL3
             int read = 0;
             try
             {
-                // Use helper overload that accepts managed byte[] to avoid unsafe fixed usage here
                 read = SDL3Helper.GetAudioStreamData(stream, rented, toRead);
 
                 if (read <= 0)
@@ -371,8 +363,7 @@ namespace SIPSorceryMedia.SDL3
                 // cancel main loop
                 _mainCts?.Cancel();
 
-                IntPtr ptr = currentHandle.DangerousGetHandle();
-                SDL3Helper.PauseAudioStreamDevice(ptr);
+                SDL3Helper.PauseAudioStreamDevice(currentHandle);
                 log.LogDebug("[PauseAudio] Audio source - Id:[{AudioInDeviceId}]", _audioDevice.id);
             }
 
@@ -407,8 +398,7 @@ namespace SIPSorceryMedia.SDL3
                     _mainTask = Task.Run(() => MainLoopAsync(_mainCts.Token));
                 }
 
-                IntPtr ptr = currentHandle.DangerousGetHandle();
-                SDL3Helper.ResumeAudioStreamDevice(ptr);
+                SDL3Helper.ResumeAudioStreamDevice(currentHandle);
                 log.LogDebug("[ResumeAudio] Audio source - Id:[{AudioInDeviceId}]", _audioDevice.id);
             }
 

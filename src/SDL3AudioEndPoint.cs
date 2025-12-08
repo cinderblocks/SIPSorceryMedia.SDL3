@@ -170,13 +170,8 @@ namespace SIPSorceryMedia.SDL3
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
 
-                var streamPtr = SDL3Helper.OpenAudioDeviceStream(_audioDevice.id, ref audioSpec, FeedStreamCallback);
-
-                SDL3AudioStreamSafeHandle? newHandle = null;
-                if (streamPtr != IntPtr.Zero)
-                {
-                    newHandle = new SDL3AudioStreamSafeHandle(streamPtr);
-                }
+                // Use SafeHandle-based API
+                SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, FeedStreamCallback);
 
                 lock (_stateLock)
                 {
@@ -196,11 +191,11 @@ namespace SIPSorceryMedia.SDL3
             catch (Exception e)
             {
                 log.LogError(e, "[InitPlaybackDevice] SDLAudioEndPoint failed to initialise device - Id:[{AudioDeviceId}   ] - DeviceName:[   {AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
-                RaiseAudioSinkError($"SDLAudioEndPoint failed to initialise device. No audio device found - Id:[{_audioDevice.id}] - DeviceName:[{_audioDevice.name}] - Exception:[{e.Message}]" );
+                RaiseAudioSinkError($"SDLAudioEndPoint failed to initialise device. No audio device found - Id:[{_audioDevice.id}] - DeviceName:[{_audioDevice.name}] - Exception:[{e.Message}]");
             }
         }
 
-        private void FeedStreamCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
+        private void FeedStreamCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
         {
             try
             {
@@ -215,10 +210,8 @@ namespace SIPSorceryMedia.SDL3
                     return;
                 }
 
-                IntPtr currentStream = currentHandle.DangerousGetHandle();
-
-                // Log debug info for diagnostics. Do not perform heavy work here.
-                int queued = SDL3Helper.GetAudioStreamQueued(currentStream);
+                // Use SafeHandle overload to query queued data
+                int queued = SDL3Helper.GetAudioStreamQueued(currentHandle);
                 log.LogDebug("[FeedStreamCallback] DeviceId:{DeviceId} additionalAmount:{Additional} totalAmount:{Total} queued:{Queued}", _audioDevice.id, additionalAmount, totalAmount, queued);
 
                 // Signal worker that space is available
@@ -257,12 +250,10 @@ namespace SIPSorceryMedia.SDL3
                         continue;
                     }
 
-                    IntPtr streamPtr = currentHandle.DangerousGetHandle();
-
                     try
                     {
                         // Put bytes into SDL stream
-                        SDL3Helper.PutAudioToStream(streamPtr, ref seg.Buffer, seg.Length);
+                        SDL3Helper.PutAudioToStream(currentHandle, ref seg.Buffer, seg.Length);
                     }
                     catch (Exception ex)
                     {
@@ -349,7 +340,7 @@ namespace SIPSorceryMedia.SDL3
                 if (_playbackWorker.IsBusy)
                     _playbackWorker.CancelAsync();
 
-                SDL3Helper.PauseAudioStreamDevice(currentHandle.DangerousGetHandle());
+                SDL3Helper.PauseAudioStreamDevice(currentHandle);
                 log.LogDebug("[PauseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
 
@@ -384,7 +375,7 @@ namespace SIPSorceryMedia.SDL3
                 if (!_playbackWorker.IsBusy)
                     _playbackWorker.RunWorkerAsync();
 
-                SDL3Helper.ResumeAudioStreamDevice(currentHandle.DangerousGetHandle());
+                SDL3Helper.ResumeAudioStreamDevice(currentHandle);
                 log.LogDebug("[ResumeAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
             }
 

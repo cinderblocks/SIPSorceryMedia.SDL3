@@ -21,6 +21,9 @@ namespace PlayAudioFile
 
         private static bool end_audio_file = false;
 
+        // SafeHandle for the opened audio stream
+        private static SDL3AudioStreamSafeHandle? _streamHandle;
+
         private static void Main(string[] args)
         {
             int deviceIndex = 0; // To store the index of the audio playback device selected
@@ -118,6 +121,9 @@ namespace PlayAudioFile
             // Free WAV file
             SDL_free(audio_buffer);
 
+            // Dispose stream handle
+            try { _streamHandle?.Dispose(); } catch { }
+
             // Close audio file
             CloseAudioDevice(deviceId);
 
@@ -133,33 +139,36 @@ namespace PlayAudioFile
 
         private static uint OpenAudioDevice(uint id)
         {
-            var stream = SDL3Helper.OpenAudioDeviceStream(id, ref audio_spec, FeedAudioCallback);
-            if (stream != IntPtr.Zero)
+            _streamHandle = SDL3Helper.OpenAudioDeviceStreamHandle(id, ref audio_spec, FeedAudioCallback);
+            if (_streamHandle != null && !_streamHandle.IsInvalid)
             {
                 /* Let the audio run */
-                SDL3Helper.ResumeAudioStreamDevice(stream);
+                SDL3Helper.ResumeAudioStreamDevice(_streamHandle);
             }
             return id;
         }
 
-        private static void FeedAudioCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
+        private static void FeedAudioCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
         {
-            
             if (end_audio_file) { return; }
 
             /* Set up the pointers */
-            var waveptr = audio_buffer + audio_pos; // Uint8
+            var waveptr = IntPtr.Add(audio_buffer, audio_pos); // Uint8
             var waveleft = (int)(audio_len - audio_pos);
+
+            // prefer provided stream handle, fallback to stored handle
+            SDL3AudioStreamSafeHandle? handleToUse = stream ?? _streamHandle;
+            if (handleToUse == null || handleToUse.IsInvalid) return;
 
             if (waveleft <= additionalAmount)
             {
-                SDL3Helper.PutAudio(stream, waveptr, waveleft);
+                SDL3Helper.PutAudio(handleToUse, waveptr, waveleft);
                 audio_pos = 0;
                 end_audio_file = true;
             }
             else
             {
-                SDL3Helper.PutAudio(stream, waveptr, additionalAmount);
+                SDL3Helper.PutAudio(handleToUse, waveptr, additionalAmount);
                 audio_pos += additionalAmount;
             }
         }

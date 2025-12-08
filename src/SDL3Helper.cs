@@ -34,23 +34,206 @@
 
 using SIPSorceryMedia.Abstractions;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Threading;
 
 using static SDL3.SDL;
 
-
 namespace SIPSorceryMedia.SDL3
 {
-    public class SDL3Helper
+    public static class SDL3Helper
     {
         private static bool _sdl3Initialised = false;
         private static readonly object _initLock = new object();
 
-        public static bool PauseAudioStreamDevice(IntPtr stream) => SDL_PauseAudioStreamDevice(stream);
+        // Keep native delegate instances alive for the lifetime of the stream
+        private static readonly ConcurrentDictionary<IntPtr, SDL_AudioStreamCallback> _nativeCallbacks = new();
 
-        public static bool ResumeAudioStreamDevice(IntPtr stream) => SDL_ResumeAudioStreamDevice(stream);
+        // New managed callback that exposes SafeHandle instead of raw IntPtr
+        public delegate void SDL_AudioStreamHandleCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additional_amount, int total_amount);
 
-        public static bool IsDevicePaused(uint deviceId) => (SDL_AudioDevicePaused(deviceId));
+        // Preferred SafeHandle-based API with SafeHandle-aware callback
+        public static SDL3AudioStreamSafeHandle? OpenAudioDeviceStreamHandle(uint deviceId, ref SDL_AudioSpec audioSpec, SDL_AudioStreamHandleCallback? callback)
+        {
+            SDL_AudioStreamCallback? nativeCallback = null;
+
+            if (callback != null)
+            {
+                // create native callback that will convert IntPtr stream to a non-owning SafeHandle wrapper
+                nativeCallback = (userdata, streamPtr, additional, total) =>
+                {
+                    SDL3AudioStreamSafeHandle? streamHandle = streamPtr == IntPtr.Zero ? null : new SDL3AudioStreamSafeHandle(streamPtr, false);
+                    try
+                    {
+                        callback(userdata, streamHandle, additional, total);
+                    }
+                    catch
+                    {
+                        // swallow exceptions in callback
+                    }
+                };
+            }
+
+            var ptr = SDL_OpenAudioDeviceStream(deviceId, ref audioSpec, nativeCallback, IntPtr.Zero);
+            if (ptr == IntPtr.Zero) return null;
+
+            var safeHandle = new SDL3AudioStreamSafeHandle(ptr);
+
+            if (nativeCallback != null)
+            {
+                // keep the native callback alive keyed by the native stream pointer
+                _nativeCallbacks[ptr] = nativeCallback!;
+            }
+
+            return safeHandle;
+        }
+
+        public static void DestroyAudioStream(SDL3AudioStreamSafeHandle? streamHandle)
+        {
+            if (streamHandle == null) return;
+
+            // remove native callback if present
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                var ptr = streamHandle.DangerousGetHandle();
+                _nativeCallbacks.TryRemove(ptr, out _);
+            }
+            catch
+            {
+                // ignore
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+
+            try { streamHandle.Dispose(); } catch { }
+        }
+
+        public static bool PauseAudioStreamDevice(SDL3AudioStreamSafeHandle? streamHandle)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return false;
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                return SDL_PauseAudioStreamDevice(streamHandle.DangerousGetHandle());
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
+        public static bool ResumeAudioStreamDevice(SDL3AudioStreamSafeHandle? streamHandle)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return false;
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                return SDL_ResumeAudioStreamDevice(streamHandle.DangerousGetHandle());
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
+        public static bool PutAudio(SDL3AudioStreamSafeHandle? streamHandle, IntPtr ptr, int bufferSize)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return false;
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                return SDL_PutAudioStreamData(streamHandle.DangerousGetHandle(), ptr, bufferSize);
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
+        public static unsafe bool PutAudioToStream(SDL3AudioStreamSafeHandle? streamHandle, ref byte[] data, int len)
+        {
+            if (data is null) throw new ArgumentNullException(nameof(data));
+            if (len < 0 || len > data.Length) throw new ArgumentOutOfRangeException(nameof(len));
+            if (len == 0) return true;
+            if (streamHandle == null || streamHandle.IsInvalid) return false;
+
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                fixed (byte* ptr = &data[0])
+                {
+                    return SDL_PutAudioStreamData(streamHandle.DangerousGetHandle(), (IntPtr)ptr, len);
+                }
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
+        public static int GetAudioStreamData(SDL3AudioStreamSafeHandle? streamHandle, IntPtr buf, int len)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return 0;
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                return SDL_GetAudioStreamData(streamHandle.DangerousGetHandle(), buf, len);
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
+        public static unsafe int GetAudioStreamData(SDL3AudioStreamSafeHandle? streamHandle, byte[] buf, int len)
+        {
+            if (buf is null) throw new ArgumentNullException(nameof(buf));
+            if (len < 0 || len > buf.Length) throw new ArgumentOutOfRangeException(nameof(len));
+            if (len == 0) return 0;
+            if (streamHandle == null || streamHandle.IsInvalid) return 0;
+
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                fixed (byte* ptr = &buf[0])
+                {
+                    return SDL_GetAudioStreamData(streamHandle.DangerousGetHandle(), (IntPtr)ptr, len);
+                }
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
+        public static int GetAudioStreamQueued(SDL3AudioStreamSafeHandle? streamHandle)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return 0;
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                return SDL_GetAudioStreamQueued(streamHandle.DangerousGetHandle());
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
+        public static bool IsDevicePaused(uint deviceId) => SDL_AudioDevicePaused(deviceId);
 
         public static (uint id, string name)? GetAudioRecordingDevice(string startWithName) => GetAudioDevice(startWithName, true);
 
@@ -88,45 +271,6 @@ namespace SIPSorceryMedia.SDL3
             return sdlAudioSpec.freq * GetBytesPerSample(sdlAudioSpec);
         }
 
-        public static bool PutAudio(IntPtr stream, IntPtr ptr, int bufferSize) => SDL_PutAudioStreamData(stream, ptr, bufferSize);
-
-        public static int GetAudioStreamQueued(IntPtr stream) => SDL_GetAudioStreamQueued(stream);
-
-        public static void Delay(uint ms) => SDL_Delay(ms);
-
-        public static IntPtr OpenAudioDeviceStream(uint deviceId, ref SDL_AudioSpec audioSpec, SDL_AudioStreamCallback callback) =>
-            SDL_OpenAudioDeviceStream(deviceId, ref audioSpec, callback, IntPtr.Zero);
-
-        public static void DestroyAudioStream(IntPtr stream) => SDL_DestroyAudioStream(stream);
-
-        public static unsafe void PutAudioToStream(IntPtr stream, ref byte[] data, int len)
-        {
-            if (data is null) throw new ArgumentNullException(nameof(data));
-            if (len < 0 || len > data.Length) throw new ArgumentOutOfRangeException(nameof(len));
-            if (len == 0) return;
-
-            fixed (byte* ptr = &data[0])
-            {
-                SDL_PutAudioStreamData(stream, (IntPtr)ptr, len);
-            }
-        }
-
-        // Wrapper to read data from an audio stream
-        public static unsafe int GetAudioStreamData(IntPtr stream, IntPtr buf, int len) => SDL_GetAudioStreamData(stream, buf, len);
-
-        // Overload to read directly into a managed byte[] (pins internally)
-        public static unsafe int GetAudioStreamData(IntPtr stream, byte[] buf, int len)
-        {
-            if (buf is null) throw new ArgumentNullException(nameof(buf));
-            if (len < 0 || len > buf.Length) throw new ArgumentOutOfRangeException(nameof(len));
-            if (len == 0) return 0;
-
-            fixed (byte* ptr = &buf[0])
-            {
-                return SDL_GetAudioStreamData(stream, (IntPtr)ptr, len);
-            }
-        }
-
         public static void InitSDL(SDL_InitFlags flags = SDL_InitFlags.SDL_INIT_AUDIO | SDL_InitFlags.SDL_INIT_TIMER)
         {
             lock (_initLock)
@@ -135,7 +279,6 @@ namespace SIPSorceryMedia.SDL3
 
                 if (!SDL_Init(flags))
                 {
-                    // Surface the SDL error message from native side
                     string err = null;
                     try { err = SDL_GetError(); } catch { err = null; }
                     if (string.IsNullOrEmpty(err)) err = "Unknown SDL error";
@@ -162,7 +305,6 @@ namespace SIPSorceryMedia.SDL3
         {
             var result = new Dictionary<uint, string>();
 
-            //Get device count
             int count;
             var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
 
@@ -189,11 +331,11 @@ namespace SIPSorceryMedia.SDL3
 
         private static (uint id, string name)? GetAudioDevice(string startWithName, bool isRecording)
         {
-            if (string.IsNullOrWhiteSpace(startWithName)) throw new ArgumentException("Value cannot be null or whitespace.", nameof(startWithName));
+            // Treat null or whitespace startWithName as "no filter" and return the default device.
+            bool hasFilter = !string.IsNullOrWhiteSpace(startWithName);
 
             (uint, string)? result = null;
 
-            //Get recording device count
             int count;
             var devices = isRecording ? SDL_GetAudioRecordingDevices(out count) : SDL_GetAudioPlaybackDevices(out count);
             if (count > 0 && devices != null)
@@ -201,7 +343,7 @@ namespace SIPSorceryMedia.SDL3
                 uint defaultDevice = isRecording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
                 result = (defaultDevice, string.Empty);
 
-                if (count > 1)
+                if (hasFilter && count > 1)
                 {
                     for (int i = 1; i < devices.Length; i++)
                     {

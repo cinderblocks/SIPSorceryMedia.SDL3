@@ -1,6 +1,5 @@
 /**
- * @file SDL3AudioStreamSafeHandle.cs
- * @brief Helper classes for SDL3
+ * @file SDL3SafeHandles.cs
  *
  * Copyright 2025, Sjofn LLC.
  *
@@ -32,34 +31,65 @@
  */
 
 using System;
-using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+using static SDL3.SDL;
 
 namespace SIPSorceryMedia.SDL3
 {
-    public sealed class SDL3AudioStreamSafeHandle : SafeHandleZeroOrMinusOneIsInvalid
+    // Base class that centralizes SafeHandle behavior for SDL handles.
+    // Subclasses must implement ReleaseHandleInternal to perform the correct native cleanup.
+    public abstract class SafeSDLHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
-        public SDL3AudioStreamSafeHandle() : base(true) { }
+        protected SafeSDLHandle() : base(true) { }
 
-        public SDL3AudioStreamSafeHandle(IntPtr handle, bool ownsHandle = true) : base(ownsHandle)
+        protected SafeSDLHandle(IntPtr handle) : base(true)
         {
             SetHandle(handle);
         }
 
+        protected SafeSDLHandle(IntPtr handle, bool ownsHandle) : base(ownsHandle)
+        {
+            SetHandle(handle);
+        }
+
+        // Derived types implement actual native release logic here.
+        protected abstract bool ReleaseHandleInternal();
+
         protected override bool ReleaseHandle()
         {
+            if (IsInvalid) return true;
             try
             {
-                if (!IsInvalid)
-                {
-                    SDL3Helper.DestroyAudioStream(handle);
-                }
+                return ReleaseHandleInternal();
             }
             catch
             {
-                // swallow exceptions; finalizer should not throw
+                // swallow exceptions from native cleanup to avoid throwing from finalizer
+                return false;
             }
-            return true;
+        }
+    }
+
+    // SafeHandle for SDL audio streams created by SDL_OpenAudioDeviceStream and freed with SDL_DestroyAudioStream
+    public sealed class SDL3AudioStreamSafeHandle : SafeSDLHandle
+    {
+        public SDL3AudioStreamSafeHandle() : base() { }
+        public SDL3AudioStreamSafeHandle(IntPtr handle) : base(handle) { }
+        // Allow creating a non-owning wrapper over an existing native pointer (do not free in ReleaseHandle)
+        public SDL3AudioStreamSafeHandle(IntPtr handle, bool ownsHandle) : base(handle, ownsHandle) { }
+
+        protected override bool ReleaseHandleInternal()
+        {
+            try
+            {
+                // Call native destroy function
+                SDL_DestroyAudioStream(handle);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

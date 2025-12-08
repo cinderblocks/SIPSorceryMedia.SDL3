@@ -33,9 +33,9 @@ namespace SIPSorceryMedia.SDL3
         private readonly byte[] _buffer;
         private readonly int _targetBytes;
 
-        // device handles/ids
-        private readonly IntPtr _recordingStream;
-        private readonly IntPtr _playbackStream;
+        // device handles/ids (use SafeHandle for streams)
+        private SDL3AudioStreamSafeHandle? _recordingStream;
+        private SDL3AudioStreamSafeHandle? _playbackStream;
         private readonly uint _recordingDeviceId;
         private readonly uint _playbackDeviceId;
 
@@ -72,13 +72,13 @@ namespace SIPSorceryMedia.SDL3
                 channels = Channels
             };
 
-            // Open streams and register callbacks
-            _recordingStream = SDL3Helper.OpenAudioDeviceStream(recordingDevice.Value.id, ref desiredRecordingSpec, FillRecordingCallback);
-            if (_recordingStream == IntPtr.Zero)
+            // Open streams and register callbacks (SafeHandle)
+            _recordingStream = SDL3Helper.OpenAudioDeviceStreamHandle(recordingDevice.Value.id, ref desiredRecordingSpec, FillRecordingCallback);
+            if (_recordingStream == null || _recordingStream.IsInvalid)
                 throw new ApplicationException("Cannot open recording device stream");
 
-            _playbackStream = SDL3Helper.OpenAudioDeviceStream(playbackDevice.Value.id, ref desiredPlaybackSpec, FillPlaybackCallback);
-            if (_playbackStream == IntPtr.Zero)
+            _playbackStream = SDL3Helper.OpenAudioDeviceStreamHandle(playbackDevice.Value.id, ref desiredPlaybackSpec, FillPlaybackCallback);
+            if (_playbackStream == null || _playbackStream.IsInvalid)
                 throw new ApplicationException("Cannot open playback device stream");
 
             // keep device ids for pause/resume
@@ -123,11 +123,15 @@ namespace SIPSorceryMedia.SDL3
             SDL_PauseAudioDevice(_playbackDeviceId);
             Console.WriteLine("Finished playback.");
 
+            // dispose handles
+            try { _recordingStream?.Dispose(); } catch { }
+            try { _playbackStream?.Dispose(); } catch { }
+
             SDL_Quit();
         }
 
         // Recording callback: single-producer append into _buffer until target is reached
-        private void FillRecordingCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
+        private void FillRecordingCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
         {
             if (additionalAmount <= 0)
                 return;
@@ -142,24 +146,38 @@ namespace SIPSorceryMedia.SDL3
             int pos = _writePos;
             int tail = _targetBytes - pos;
 
-            if (toCopy <= tail)
+            if (stream == null || stream.IsInvalid)
+                return;
+
+            bool added = false;
+            try
             {
-                fixed (byte* dst = &_buffer[pos])
+                stream.DangerousAddRef(ref added);
+                IntPtr nativePtr = stream.DangerousGetHandle();
+
+                if (toCopy <= tail)
                 {
-                    Buffer.MemoryCopy((byte*)stream, dst, toCopy, toCopy);
+                    fixed (byte* dst = &_buffer[pos])
+                    {
+                        Buffer.MemoryCopy((byte*)nativePtr, dst, toCopy, toCopy);
+                    }
+                }
+                else
+                {
+                    // copy tail then head (shouldn't usually happen because we stop at target)
+                    fixed (byte* dst = &_buffer[pos])
+                    {
+                        Buffer.MemoryCopy((byte*)nativePtr, dst, tail, tail);
+                    }
+                    fixed (byte* dst0 = &_buffer[0])
+                    {
+                        Buffer.MemoryCopy((byte*)nativePtr + tail, dst0, toCopy - tail, toCopy - tail);
+                    }
                 }
             }
-            else
+            finally
             {
-                // copy tail then head (shouldn't usually happen because we stop at target)
-                fixed (byte* dst = &_buffer[pos])
-                {
-                    Buffer.MemoryCopy((byte*)stream, dst, tail, tail);
-                }
-                fixed (byte* dst0 = &_buffer[0])
-                {
-                    Buffer.MemoryCopy((byte*)stream + tail, dst0, toCopy - tail, toCopy - tail);
-                }
+                if (added) stream.DangerousRelease();
             }
 
             // advance write pos and recorded count
@@ -169,7 +187,7 @@ namespace SIPSorceryMedia.SDL3
         }
 
         // Playback callback: single-consumer read from _buffer into stream until consumed
-        private void FillPlaybackCallback(IntPtr userdata, IntPtr stream, int additionalAmount, int totalAmount)
+        private void FillPlaybackCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
         {
             if (additionalAmount <= 0)
                 return;
@@ -180,7 +198,18 @@ namespace SIPSorceryMedia.SDL3
             if (available <= 0)
             {
                 // nothing yet or finished; zero-fill playback buffer to avoid noise
-                ZeroFillPlaybackBuffer((byte*)stream, additionalAmount);
+                if (stream == null || stream.IsInvalid) return;
+                bool added = false;
+                try
+                {
+                    stream.DangerousAddRef(ref added);
+                    IntPtr nativePtr = stream.DangerousGetHandle();
+                    ZeroFillPlaybackBuffer((byte*)nativePtr, additionalAmount);
+                }
+                finally
+                {
+                    if (added) stream.DangerousRelease();
+                }
                 return;
             }
 
@@ -189,32 +218,45 @@ namespace SIPSorceryMedia.SDL3
             int pos = _readPos;
             int tail = _targetBytes - pos;
 
-            if (toCopy <= tail)
-            {
-                fixed (byte* src = &_buffer[pos])
-                {
-                    Buffer.MemoryCopy(src, (byte*)stream, toCopy, toCopy);
-                }
-            }
-            else
-            {
-                fixed (byte* src = &_buffer[pos])
-                {
-                    Buffer.MemoryCopy(src, (byte*)stream, tail, tail);
-                }
-                fixed (byte* src0 = &_buffer[0])
-                {
-                    Buffer.MemoryCopy(src0, (byte*)stream + tail, toCopy - tail, toCopy - tail);
-                }
-            }
+            if (stream == null || stream.IsInvalid) return;
 
-            int newPos = (pos + toCopy) % _targetBytes;
-            Volatile.Write(ref _readPos, newPos);
-            Interlocked.Add(ref _playedBytes, toCopy);
+            bool added2 = false;
+            try
+            {
+                stream.DangerousAddRef(ref added2);
+                IntPtr nativePtr = stream.DangerousGetHandle();
 
-            // If additionalAmount was larger, zero-fill the remainder to avoid playback garbage
-            if (toCopy < additionalAmount)
-                ZeroFillPlaybackBuffer((byte*)stream + toCopy, additionalAmount - toCopy);
+                if (toCopy <= tail)
+                {
+                    fixed (byte* src = &_buffer[pos])
+                    {
+                        Buffer.MemoryCopy(src, (byte*)nativePtr, toCopy, toCopy);
+                    }
+                }
+                else
+                {
+                    fixed (byte* src = &_buffer[pos])
+                    {
+                        Buffer.MemoryCopy(src, (byte*)nativePtr, tail, tail);
+                    }
+                    fixed (byte* src0 = &_buffer[0])
+                    {
+                        Buffer.MemoryCopy(src0, (byte*)nativePtr + tail, toCopy - tail, toCopy - tail);
+                    }
+                }
+
+                int newPos = (pos + toCopy) % _targetBytes;
+                Volatile.Write(ref _readPos, newPos);
+                Interlocked.Add(ref _playedBytes, toCopy);
+
+                // If additionalAmount was larger, zero-fill the remainder to avoid playback garbage
+                if (toCopy < additionalAmount)
+                    ZeroFillPlaybackBuffer((byte*)nativePtr + toCopy, additionalAmount - toCopy);
+            }
+            finally
+            {
+                if (added2) stream.DangerousRelease();
+            }
         }
 
         private static void ZeroFillPlaybackBuffer(byte* dst, int length)
