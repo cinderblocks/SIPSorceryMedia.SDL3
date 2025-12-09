@@ -171,7 +171,7 @@ namespace SIPSorceryMedia.SDL3
 
                 // Init Playback device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
-                var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
+                var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, (byte)audioFormat.ChannelCount);
 
                 // Use SafeHandle-based API
                 SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, FeedStreamCallback);
@@ -185,7 +185,7 @@ namespace SIPSorceryMedia.SDL3
                     {
                         try { SDL3Helper.DestroyAudioStream(prev); } catch { }
                     }
-                 }
+                }
 
                 if(newHandle != null && !newHandle.IsInvalid)
                     log.LogDebug("[InitPlaybackDevice] Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
@@ -268,19 +268,19 @@ namespace SIPSorceryMedia.SDL3
                     {
                         // Use helper that pins buffer and calls into native safely
                         SDL3Helper.PutAudioPinned(currentHandle, seg.Buffer, seg.Length);
-                     }
-                     catch (Exception ex)
-                     {
+                    }
+                    catch (Exception ex)
+                    {
                          log.LogError(ex, "PlaybackWorker: error putting audio to stream");
-                     }
-                     finally
-                     {
+                    }
+                    finally
+                    {
                          // Return buffer to pool
                          try { pool.Return(seg.Buffer); } catch (Exception) { }
-                     }
-                 }
-             }
-         }
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// Queues a raw PCM audio sample for playback.
