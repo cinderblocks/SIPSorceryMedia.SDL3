@@ -165,7 +165,8 @@ namespace SIPSorceryMedia.SDL3
                     try
                     {
                         currentHandle.DangerousAddRef(ref added);
-                        size = SDL3Helper.GetAudioStreamQueued(currentHandle);
+                        // For recording devices, use GetAudioStreamAvailable instead of GetAudioStreamQueued
+                        size = SDL3Helper.GetAudioStreamAvailable(currentHandle);
                     }
                     finally
                     {
