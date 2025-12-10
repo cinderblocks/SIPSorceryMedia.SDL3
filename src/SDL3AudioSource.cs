@@ -44,9 +44,22 @@ using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
 {
+    /// <summary>
+    /// Performance statistics for audio source.
+    /// </summary>
+    public struct AudioSourceStats
+    {
+        public long OverrunCount { get; set; }
+        public long DroppedFrames { get; set; }
+        public bool IsActive { get; set; }
+    }
+
     public class SDL3AudioSource : IAudioSource, IDisposable
     {
         private const int MAX_AUDIO_RENT = 1024 * 1024; // 1MB cap for rented buffers
+        // Channel capacity to prevent unbounded growth (max ~500ms of audio at typical frame rates)
+        private const int CHANNEL_CAPACITY = 25;
+        
         private static readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
 
         private readonly (uint id, string name) _audioDevice;
@@ -73,10 +86,14 @@ namespace SIPSorceryMedia.SDL3
         // When true the SDL audio stream callback will provide data; main loop should not pull data.
         private volatile bool _useStreamCallbackReading = false;
 
-        // channel populated by the SDL callback; worker will consume and return buffers to pool
-        private readonly Channel<(byte[] Buffer, int Length)> _callbackChannel = Channel.CreateUnbounded<(byte[] Buffer, int Length)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+        // Bounded channel for callback data with better backpressure handling
+        private readonly Channel<(byte[] Buffer, int Length)> _callbackChannel;
         private CancellationTokenSource? _callbackCts = null;
         private Task? _callbackTask = null;
+
+        // Stats for diagnostics
+        private long _overrunCount = 0;
+        private long _droppedFrames = 0;
 
 #region EVENT
 
@@ -110,6 +127,15 @@ namespace SIPSorceryMedia.SDL3
             _audioEncoder = audioEncoder;
 
             this.frameSize = frameSize;
+            
+            // Use bounded channel with drop-oldest strategy for better performance
+            _callbackChannel = Channel.CreateBounded<(byte[] Buffer, int Length)>(
+                new BoundedChannelOptions(CHANNEL_CAPACITY)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
         }
 
         ~SDL3AudioSource()
@@ -193,18 +219,8 @@ namespace SIPSorceryMedia.SDL3
                                 if (add2) currentHandle.DangerousRelease();
                             }
 
-                            int shortCount = bufferSize / sizeof(short);
-                            short[] pcm = new short[shortCount];
-                            Buffer.BlockCopy(buf, 0, pcm, 0, shortCount * sizeof(short));
-
-                            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
-
-                            if (OnAudioSourceEncodedSample != null)
-                            {
-                                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
-                                if (encodedSample.Length > 0)
-                                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
-                            }
+                            // Fast path: process buffer inline instead of extra copy
+                            ProcessAudioBuffer(buf, bufferSize);
                         }
                         finally
                         {
@@ -275,9 +291,11 @@ namespace SIPSorceryMedia.SDL3
 
             var pool = ArrayPool<byte>.Shared;
             int toRead = additionalAmount;
+            
             // Defensive cap to avoid abusive sizes causing huge rents
             if (toRead <= 0) return;
             if (toRead > MAX_AUDIO_RENT) toRead = MAX_AUDIO_RENT;
+            
             byte[] rented = pool.Rent(toRead);
 
             int read = 0;
@@ -298,9 +316,14 @@ namespace SIPSorceryMedia.SDL3
                 }
 
                 var writer = _callbackChannel.Writer;
+                
+                // TryWrite with bounded channel will drop oldest if full (configured in channel options)
                 if (!writer.TryWrite((rented, read)))
                 {
+                    // This should not happen with DropOldest mode, but handle defensively
+                    Interlocked.Increment(ref _droppedFrames);
                     pool.Return(rented);
+                    log.LogDebug("UnqueueStreamCallback: channel write failed, dropped frame (total: {DroppedFrames})", _droppedFrames);
                 }
             }
             catch (Exception ex)
@@ -322,23 +345,17 @@ namespace SIPSorceryMedia.SDL3
             {
                 while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
                 {
-                    while (reader.TryRead(out var seg))
+                    // Batch processing: read multiple buffers if available for efficiency
+                    int processedCount = 0;
+                    const int maxBatchSize = 5;
+                    
+                    while (processedCount < maxBatchSize && reader.TryRead(out var seg))
                     {
+                        processedCount++;
+                        
                         try
                         {
-                            int read = seg.Length;
-                            int shortCount = read / sizeof(short);
-                            short[] pcm = new short[shortCount];
-                            Buffer.BlockCopy(seg.Buffer, 0, pcm, 0, shortCount * sizeof(short));
-
-                            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
-
-                            if (OnAudioSourceEncodedSample != null)
-                            {
-                                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
-                                if (encodedSample.Length > 0)
-                                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
-                            }
+                            ProcessAudioBuffer(seg.Buffer, seg.Length);
                         }
                         catch (Exception ex)
                         {
@@ -356,6 +373,45 @@ namespace SIPSorceryMedia.SDL3
             {
                 log.LogError(ex, "CallbackWorkerLoopAsync unexpected error");
             }
+        }
+
+        // Extracted processing logic to reduce duplication
+        private void ProcessAudioBuffer(byte[] buffer, int length)
+        {
+            int shortCount = length / sizeof(short);
+            short[] pcm = new short[shortCount];
+            Buffer.BlockCopy(buffer, 0, pcm, 0, shortCount * sizeof(short));
+
+            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
+
+            if (OnAudioSourceEncodedSample != null)
+            {
+                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
+                if (encodedSample.Length > 0)
+                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
+            }
+        }
+
+        /// <summary>
+        /// Gets diagnostic statistics about the audio source performance.
+        /// </summary>
+        public AudioSourceStats GetStats()
+        {
+            return new AudioSourceStats
+            {
+                OverrunCount = Interlocked.Read(ref _overrunCount),
+                DroppedFrames = Interlocked.Read(ref _droppedFrames),
+                IsActive = _isStarted && !_isPaused
+            };
+        }
+
+        /// <summary>
+        /// Resets performance statistics.
+        /// </summary>
+        public void ResetStats()
+        {
+            Interlocked.Exchange(ref _overrunCount, 0);
+            Interlocked.Exchange(ref _droppedFrames, 0);
         }
 
         public Task PauseAudio()

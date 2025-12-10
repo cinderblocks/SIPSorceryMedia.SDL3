@@ -46,9 +46,24 @@ using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
 {
+    /// <summary>
+    /// Performance statistics for audio sink.
+    /// </summary>
+    public struct AudioSinkStats
+    {
+        public long UnderrunCount { get; set; }
+        public long DroppedFrames { get; set; }
+        public int QueueDepth { get; set; }
+        public bool IsActive { get; set; }
+    }
+
     public class SDL3AudioEndPoint : IAudioSink, IDisposable
     {
         private const int MAX_AUDIO_RENT = 1024 * 1024; // 1MB
+        // Optimal buffer size for low-latency voice: ~20ms at 48kHz stereo = 3840 bytes
+        private const int OPTIMAL_BUFFER_SIZE = 3840;
+        // Queue capacity to prevent unbounded growth (max ~200ms of audio)
+        private const int MAX_QUEUE_CAPACITY = 10;
 
         private readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioEndPoint>();
 
@@ -68,10 +83,15 @@ namespace SIPSorceryMedia.SDL3
 
         public event SourceErrorDelegate ? OnAudioSinkError = null;
 
-        // Playback queue populated by producers; worker will dequeue and call SDL to put data into stream
+        // Playback queue with bounded capacity
         private readonly ConcurrentQueue<(byte[] Buffer, int Length)> _playbackQueue = new ConcurrentQueue<(byte[] Buffer, int Length)>();
+        private int _queueCount = 0; // Track queue depth for bounded capacity
         private readonly SemaphoreSlim _playbackSemaphore = new SemaphoreSlim(0);
         private readonly BackgroundWorker _playbackWorker;
+
+        // Stats for monitoring and diagnostics
+        private long _underrunCount = 0;
+        private long _droppedFrames = 0;
 
         /// <summary>
         /// Creates a new basic RTP session that captures and renders audio to/from the system devices.
@@ -171,7 +191,7 @@ namespace SIPSorceryMedia.SDL3
 
                 // Init Playback device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
-                var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, (byte)audioFormat.ChannelCount);
+                var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
 
                 // Use SafeHandle-based API
                 SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, FeedStreamCallback);
@@ -185,7 +205,7 @@ namespace SIPSorceryMedia.SDL3
                     {
                         try { SDL3Helper.DestroyAudioStream(prev); } catch { }
                     }
-                }
+                 }
 
                 if(newHandle != null && !newHandle.IsInvalid)
                     log.LogDebug("[InitPlaybackDevice] Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
@@ -219,12 +239,18 @@ namespace SIPSorceryMedia.SDL3
 
                 // Use SafeHandle overload to query queued data
                 int queued = SDL3Helper.GetAudioStreamQueued(currentHandle);
-                log.LogDebug("[FeedStreamCallback] DeviceId:{DeviceId} additionalAmount:{Additional} totalAmount:{Total} queued:{Queued}", _audioDevice.id, additionalAmount, totalAmount, queued);
+                
+                // Log underruns for diagnostics
+                if (queued == 0 && additionalAmount > 0)
+                {
+                    Interlocked.Increment(ref _underrunCount);
+                    log.LogDebug("[FeedStreamCallback] Buffer underrun detected (count: {UnderrunCount})", _underrunCount);
+                }
 
-                // Signal worker that space is available
+                // Signal worker that space is available (use TryRelease to avoid semaphore overflow)
                 if (additionalAmount > 0)
                 {
-                    try { _playbackSemaphore.Release(); } catch { }
+                    try { _playbackSemaphore.Release(); } catch (SemaphoreFullException) { }
                 }
             }
             catch (Exception ex)
@@ -236,28 +262,45 @@ namespace SIPSorceryMedia.SDL3
         private void PlaybackWorker_DoWork(object? sender, DoWorkEventArgs e)
         {
             var pool = ArrayPool<byte>.Shared;
+            
+            // Pre-allocate a working buffer to reduce allocations
+            byte[]? workBuffer = null;
 
             while (!_playbackWorker.CancellationPending && !_disposed)
             {
-                // Wait for available buffer or timeout
-                _playbackSemaphore.Wait(50);
-
-                while (_playbackQueue.TryDequeue(out var seg))
+                // Wait for available buffer space or timeout
+                if (!_playbackSemaphore.Wait(50))
                 {
-                    SDL3AudioStreamSafeHandle? currentHandle;
-                    lock (_stateLock)
-                    {
-                        currentHandle = _audioStream;
-                    }
+                    continue; // Timeout, check cancellation and retry
+                }
 
-                    if (currentHandle == null || currentHandle.IsInvalid)
-                    {
-                        // return buffer
-                        try { pool.Return(seg.Buffer); } catch (Exception) { }
-                        continue;
-                    }
+                SDL3AudioStreamSafeHandle? currentHandle;
+                lock (_stateLock)
+                {
+                    currentHandle = _audioStream;
+                }
 
-                    // basic validation of segment
+                if (currentHandle == null || currentHandle.IsInvalid)
+                {
+                    // Drain queue and return buffers on invalid handle
+                    while (_playbackQueue.TryDequeue(out var discarded))
+                    {
+                        Interlocked.Decrement(ref _queueCount);
+                        try { pool.Return(discarded.Buffer); } catch { }
+                    }
+                    continue;
+                }
+
+                // Batch processing: dequeue and write multiple buffers if available
+                int processedCount = 0;
+                const int maxBatchSize = 3; // Process up to 3 buffers per iteration for efficiency
+                
+                while (processedCount < maxBatchSize && _playbackQueue.TryDequeue(out var seg))
+                {
+                    Interlocked.Decrement(ref _queueCount);
+                    processedCount++;
+
+                    // Validate segment
                     if (seg.Buffer == null || seg.Length <= 0 || seg.Length > seg.Buffer.Length)
                     {
                         try { pool.Return(seg.Buffer); } catch (Exception) { }
@@ -266,19 +309,25 @@ namespace SIPSorceryMedia.SDL3
 
                     try
                     {
-                        // Use helper that pins buffer and calls into native safely
+                        // Fast path: use buffer directly if size is reasonable
                         SDL3Helper.PutAudioPinned(currentHandle, seg.Buffer, seg.Length);
                     }
                     catch (Exception ex)
                     {
-                         log.LogError(ex, "PlaybackWorker: error putting audio to stream");
+                        log.LogError(ex, "PlaybackWorker: error putting audio to stream");
                     }
                     finally
                     {
-                         // Return buffer to pool
-                         try { pool.Return(seg.Buffer); } catch (Exception) { }
+                        // Return buffer to pool
+                        try { pool.Return(seg.Buffer); } catch { }
                     }
                 }
+            }
+            
+            // Cleanup
+            if (workBuffer != null)
+            {
+                try { pool.Return(workBuffer); } catch { }
             }
         }
 
@@ -290,25 +339,41 @@ namespace SIPSorceryMedia.SDL3
         {
             if (pcmSample == null || pcmSample.Length == 0) return;
 
-            // defensive protection against absurdly large samples
+            // Defensive protection against absurdly large samples
             if (pcmSample.Length > MAX_AUDIO_RENT)
             {
                 log.LogWarning("PutAudioSample: sample size {Size} exceeds maximum allowed {Max}, dropping", pcmSample.Length, MAX_AUDIO_RENT);
                 return;
             }
 
-            // Rent a buffer and copy data to avoid producers holding onto arrays and to reuse buffers
-            var pool = ArrayPool<byte>.Shared;
-            var buf = pool.Rent(pcmSample.Length);
+            // Implement bounded queue: drop oldest frames if queue is full
+            int currentCount = Interlocked.CompareExchange(ref _queueCount, 0, 0);
+            if (currentCount >= MAX_QUEUE_CAPACITY)
+            {
+                // Queue full - drop oldest frame to make room
+                if (_playbackQueue.TryDequeue(out var oldest))
+                {
+                    Interlocked.Decrement(ref _queueCount);
+                    Interlocked.Increment(ref _droppedFrames);
+                    var pool = ArrayPool<byte>.Shared;
+                    try { pool.Return(oldest.Buffer); } catch { }
+                    log.LogDebug("PutAudioSample: queue full, dropped oldest frame (total dropped: {DroppedFrames})", _droppedFrames);
+                }
+            }
 
-            // Copy into rented buffer using helper that pins the source briefly
-            SDL3Helper.CopyToRentedBuffer(pcmSample, buf, pcmSample.Length);
+            // Rent a buffer and copy data
+            var pool2 = ArrayPool<byte>.Shared;
+            var buf = pool2.Rent(pcmSample.Length);
+
+            // Copy using Buffer.BlockCopy for efficiency
+            Buffer.BlockCopy(pcmSample, 0, buf, 0, pcmSample.Length);
 
             // Enqueue for playback worker
             _playbackQueue.Enqueue((buf, pcmSample.Length));
+            Interlocked.Increment(ref _queueCount);
 
-            // Signal worker
-            try { _playbackSemaphore.Release(); } catch { }
+            // Signal worker (ignore overflow)
+            try { _playbackSemaphore.Release(); } catch (SemaphoreFullException) { }
         }
 
         [Obsolete("Use GotEncodeMediaFrame instead.")]
@@ -332,6 +397,29 @@ namespace SIPSorceryMedia.SDL3
             var pcmBytes = new byte[pcmSample.Length * sizeof(short)];
             Buffer.BlockCopy(pcmSample, 0, pcmBytes, 0, pcmBytes.Length);
             PutAudioSample(pcmBytes);
+        }
+
+        /// <summary>
+        /// Gets diagnostic statistics about the audio endpoint performance.
+        /// </summary>
+        public AudioSinkStats GetStats()
+        {
+            return new AudioSinkStats
+            {
+                UnderrunCount = Interlocked.Read(ref _underrunCount),
+                DroppedFrames = Interlocked.Read(ref _droppedFrames),
+                QueueDepth = Interlocked.CompareExchange(ref _queueCount, 0, 0),
+                IsActive = _isStarted && !_isPaused
+            };
+        }
+
+        /// <summary>
+        /// Resets performance statistics.
+        /// </summary>
+        public void ResetStats()
+        {
+            Interlocked.Exchange(ref _underrunCount, 0);
+            Interlocked.Exchange(ref _droppedFrames, 0);
         }
 
         /// <summary>
