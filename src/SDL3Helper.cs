@@ -209,6 +209,41 @@ namespace SIPSorceryMedia.SDL3
             return WithHandle(streamHandle, ptr => SDL_GetAudioStreamQueued(ptr), 0);
         }
 
+        public static int GetAudioStreamAvailable(SDL3AudioStreamSafeHandle? streamHandle)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return 0;
+            return WithHandle(streamHandle, ptr => SDL_GetAudioStreamAvailable(ptr), 0);
+        }
+
+        public static bool SetAudioStreamFrequencyRatio(SDL3AudioStreamSafeHandle? streamHandle, float ratio)
+        {
+            if (streamHandle == null || streamHandle.IsInvalid) return false;
+            return WithHandle<bool>(streamHandle, ptr => SDL_SetAudioStreamFrequencyRatio(ptr, ratio) ? true : false, false);
+        }
+
+        public static bool GetAudioStreamFormat(SDL3AudioStreamSafeHandle? streamHandle, out SDL_AudioSpec srcSpec, out SDL_AudioSpec dstSpec)
+        {
+            srcSpec = default;
+            dstSpec = default;
+            if (streamHandle == null || streamHandle.IsInvalid) return false;
+            
+            bool added = false;
+            try
+            {
+                streamHandle.DangerousAddRef(ref added);
+                var ptr = streamHandle.DangerousGetHandle();
+                return SDL_GetAudioStreamFormat(ptr, out srcSpec, out dstSpec);
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                if (added) streamHandle.DangerousRelease();
+            }
+        }
+
         public static bool IsDevicePaused(uint deviceId) => SDL_AudioDevicePaused(deviceId);
 
         public static (uint id, string name)? GetAudioRecordingDevice(string startWithName) => GetAudioDevice(startWithName, true);
@@ -312,16 +347,15 @@ namespace SIPSorceryMedia.SDL3
 
             if (count > 0)
             {
-                // Iterate by index for name lookup (safe) but keep device ID as dictionary key.
                 int limit = Math.Min(count, devices.Length);
                 for (int i = 0; i < limit; i++)
                 {
                     try
                     {
                         var deviceId = devices[i];
-                        if (result.ContainsKey(deviceId)) { continue; } // avoid duplicates
+                        if (result.ContainsKey(deviceId)) { continue; }
 
-                        var name = SDL_GetAudioDeviceName(i) ?? string.Empty;
+                        var name = SDL_GetAudioDeviceName((int)deviceId) ?? string.Empty;
                         if (name.Length == 0) { continue; }
                         result.Add(deviceId, name);
                     }
@@ -355,10 +389,11 @@ namespace SIPSorceryMedia.SDL3
                     {
                         try
                         {
-                            var deviceName = SDL_GetAudioDeviceName(i) ?? string.Empty;
+                            var deviceId = devices[i];
+                            var deviceName = SDL_GetAudioDeviceName((int)deviceId) ?? string.Empty;
                             if (deviceName.StartsWith(startWithName, StringComparison.InvariantCultureIgnoreCase))
                             {
-                                return (devices[i], deviceName);
+                                return (deviceId, deviceName);
                             }
                         }
                         catch
@@ -388,8 +423,9 @@ namespace SIPSorceryMedia.SDL3
                 {
                     try
                     {
-                        var name = SDL_GetAudioDeviceName(index) ?? string.Empty;
-                        result = (devices[index], name);
+                        var deviceId = devices[index];
+                        var name = SDL_GetAudioDeviceName((int)deviceId) ?? string.Empty;
+                        result = (deviceId, name);
                     }
                     catch
                     {

@@ -1,7 +1,10 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
+using System.Threading;
 using static SDL3.SDL;
 using SIPSorceryMedia.SDL3;
+using System.Runtime.InteropServices;
 
 namespace RecordThenPlayback
 {
@@ -22,29 +25,10 @@ namespace SIPSorceryMedia.SDL3
 
     public unsafe class SDL3RecordThenPlayback
     {
-        // local record seconds constant to avoid cross-class reference
         private const int RECORD_SECONDS_LOCAL = 5;
-
-        // audio format used for both record and playback
         private const int Frequency = 44100;
         private const SDL_AudioFormat Format = SDL_AudioFormat.SDL_AUDIO_F32;
         private const int Channels = 2;
-
-        // buffer for exactly RECORD_SECONDS of audio
-        private readonly byte[] _buffer;
-        private readonly int _targetBytes;
-
-        // device handles/ids (use SafeHandle for streams)
-        private SDL3AudioStreamSafeHandle? _recordingStream;
-        private SDL3AudioStreamSafeHandle? _playbackStream;
-        private readonly uint _recordingDeviceId;
-        private readonly uint _playbackDeviceId;
-
-        // writer and reader positions and counters (safely updated from callbacks)
-        private volatile int _writePos = 0;
-        private volatile int _readPos = 0;
-        private long _recordedBytes = 0;
-        private long _playedBytes = 0;
 
         public SDL3RecordThenPlayback()
         {
@@ -59,210 +43,143 @@ namespace SIPSorceryMedia.SDL3
             if (!playbackDevice.HasValue)
                 throw new ApplicationException("Playback device not found");
 
-            SDL_AudioSpec desiredRecordingSpec = new SDL_AudioSpec
+            SDL_AudioSpec desiredSpec = new SDL_AudioSpec
             {
                 freq = Frequency,
                 format = Format,
                 channels = Channels
             };
 
-            SDL_AudioSpec desiredPlaybackSpec = new SDL_AudioSpec
-            {
-                freq = Frequency,
-                format = Format,
-                channels = Channels
-            };
+            Console.WriteLine($"Requesting: {desiredSpec.freq}Hz {desiredSpec.format} {desiredSpec.channels}ch");
 
-            // Open streams and register callbacks (SafeHandle)
-            _recordingStream = SDL3Helper.OpenAudioDeviceStreamHandle(recordingDevice.Value.id, ref desiredRecordingSpec, FillRecordingCallback);
-            if (_recordingStream == null || _recordingStream.IsInvalid)
-                throw new ApplicationException("Cannot open recording device stream");
+            // Open recording device and create a stream bound to it
+            uint recDeviceId = SDL_OpenAudioDevice(recordingDevice.Value.id, ref desiredSpec);
+            if (recDeviceId == 0)
+                throw new ApplicationException("Cannot open recording device");
 
-            _playbackStream = SDL3Helper.OpenAudioDeviceStreamHandle(playbackDevice.Value.id, ref desiredPlaybackSpec, FillPlaybackCallback);
-            if (_playbackStream == null || _playbackStream.IsInvalid)
+            IntPtr recStreamPtr = SDL_CreateAudioStream(ref desiredSpec, ref desiredSpec);
+            if (recStreamPtr == IntPtr.Zero)
+                throw new ApplicationException("Cannot create recording stream");
+
+            if (!SDL_BindAudioStream(recDeviceId, recStreamPtr))
+                throw new ApplicationException("Cannot bind recording stream to device");
+
+            var playbackStream = SDL3Helper.OpenAudioDeviceStreamHandle(playbackDevice.Value.id, ref desiredSpec, null);
+            if (playbackStream == null || playbackStream.IsInvalid)
                 throw new ApplicationException("Cannot open playback device stream");
 
-            // keep device ids for pause/resume
-            _recordingDeviceId = recordingDevice.Value.id;
-            _playbackDeviceId = playbackDevice.Value.id;
+            int bytesPerSecond = SDL3Helper.GetBytesPerSecond(desiredSpec);
+            Console.WriteLine($"Audio format: {Frequency}Hz {Format} {Channels}ch = {bytesPerSecond} bytes/sec");
 
-            // compute bytes per second from spec (helper returns bytes for freq/channels/format)
-            int bytesPerSecond = SDL3Helper.GetBytesPerSecond(desiredRecordingSpec);
-            _targetBytes = RECORD_SECONDS_LOCAL * bytesPerSecond;
-            _buffer = new byte[_targetBytes];
+            List<byte[]> recordedChunks = new List<byte[]>();
+            int totalRecorded = 0;
+            bool recording = true;
 
-            // RECORD -> wait for 5 seconds of data -> notify -> wait 5 seconds -> PLAYBACK
-            Console.WriteLine("Starting recording for {0} seconds...", RECORD_SECONDS_LOCAL);
-            SDL3Helper.ResumeAudioStreamDevice(_recordingStream);
-
-            // Wait until we have recorded target bytes
-            while (Interlocked.Read(ref _recordedBytes) < _targetBytes)
+            Thread recordingThread = new Thread(() =>
             {
-                Thread.Sleep(10);
+                while (recording)
+                {
+                    int available = SDL_GetAudioStreamAvailable(recStreamPtr);
+                    if (available > 0)
+                    {
+                        byte[] chunk = new byte[available];
+                        GCHandle gch = GCHandle.Alloc(chunk, GCHandleType.Pinned);
+                        try
+                        {
+                            IntPtr bufPtr = gch.AddrOfPinnedObject();
+                            int read = SDL_GetAudioStreamData(recStreamPtr, bufPtr, available);
+                            if (read > 0)
+                            {
+                                Array.Resize(ref chunk, read);
+                                lock (recordedChunks)
+                                {
+                                    recordedChunks.Add(chunk);
+                                    totalRecorded += read;
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            gch.Free();
+                        }
+                    }
+                    Thread.Sleep(1);
+                }
+            });
+            recordingThread.Priority = ThreadPriority.Highest;
+
+            Console.WriteLine("Starting recording for {0} seconds...", RECORD_SECONDS_LOCAL);
+            SDL_ResumeAudioDevice(recDeviceId);
+
+            var recordingStartTime = DateTime.UtcNow;
+            recordingThread.Start();
+
+            Thread.Sleep(TimeSpan.FromSeconds(RECORD_SECONDS_LOCAL));
+
+            recording = false;
+            SDL_PauseAudioDevice(recDeviceId);
+            recordingThread.Join(1000);
+
+            var recordingDuration = (DateTime.UtcNow - recordingStartTime).TotalSeconds;
+            Console.WriteLine($"Finished recording. Duration: {recordingDuration:F2} seconds");
+            Console.WriteLine($"Recorded {totalRecorded} bytes = {totalRecorded / (float)bytesPerSecond:F2} seconds of audio");
+
+            byte[] buffer = new byte[totalRecorded];
+            int offset = 0;
+            lock (recordedChunks)
+            {
+                foreach (var chunk in recordedChunks)
+                {
+                    Buffer.BlockCopy(chunk, 0, buffer, offset, chunk.Length);
+                    offset += chunk.Length;
+                }
             }
 
-            // Stop recording
-            SDL_PauseAudioDevice(_recordingDeviceId);
-            Console.WriteLine("Finished recording.");
-
-            // Wait 2 seconds before playback
-            Thread.Sleep(TimeSpan.FromSeconds(2));
+            Thread.Sleep(TimeSpan.FromSeconds(1));
             Console.WriteLine("Starting playback...");
 
-            // Prepare playback counters and start playback
-            Interlocked.Exchange(ref _playedBytes, 0);
-            Volatile.Write(ref _readPos, 0);
+            SDL3Helper.ResumeAudioStreamDevice(playbackStream);
 
-            SDL3Helper.ResumeAudioStreamDevice(_playbackStream);
-
-            // Wait until playback consumed all recorded bytes
-            while (Interlocked.Read(ref _playedBytes) < _targetBytes)
-            {
-                Thread.Sleep(10);
-            }
-
-            SDL_PauseAudioDevice(_playbackDeviceId);
-            Console.WriteLine("Finished playback.");
-
-            // dispose handles via helper to unregister callbacks
-            try { SDL3Helper.DestroyAudioStream(_recordingStream); } catch { }
-            try { SDL3Helper.DestroyAudioStream(_playbackStream); } catch { }
-
-            SDL_Quit();
-        }
-
-        // Recording callback: single-producer append into _buffer until target is reached
-        private void FillRecordingCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
-        {
-            if (additionalAmount <= 0)
-                return;
-
-            // how many bytes are still needed
-            int remaining = _targetBytes - (int)Interlocked.Read(ref _recordedBytes);
-            if (remaining <= 0)
-                return;
-
-            int toCopy = Math.Min(additionalAmount, remaining);
-
-            int pos = _writePos;
-            int tail = _targetBytes - pos;
-
-            if (stream == null || stream.IsInvalid)
-                return;
-
+            var playbackStartTime = DateTime.UtcNow;
+            int chunkSize = bytesPerSecond / 20;
+            int totalPlayed = 0;
             var pool = ArrayPool<byte>.Shared;
-            byte[] rented = pool.Rent(toCopy);
-            try
+
+            while (totalPlayed < totalRecorded)
             {
-                int read = SDL3Helper.GetAudioStreamData(stream, rented, toCopy);
-                if (read <= 0)
-                {
-                    return;
-                }
-
-                if (read <= tail)
-                {
-                    Buffer.BlockCopy(rented, 0, _buffer, pos, read);
-                }
-                else
-                {
-                    Buffer.BlockCopy(rented, 0, _buffer, pos, tail);
-                    Buffer.BlockCopy(rented, tail, _buffer, 0, read - tail);
-                }
-                toCopy = read;
-            }
-            finally
-            {
-                try { pool.Return(rented); } catch { }
-            }
-
-            // advance write pos and recorded count
-            int newPos = (pos + toCopy) % _targetBytes;
-            Volatile.Write(ref _writePos, newPos);
-            Interlocked.Add(ref _recordedBytes, toCopy);
-        }
-
-        // Playback callback: single-consumer read from _buffer into stream until consumed
-        private void FillPlaybackCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
-        {
-            if (additionalAmount <= 0)
-                return;
-
-            int recorded = (int)Interlocked.Read(ref _recordedBytes);
-            int played = (int)Interlocked.Read(ref _playedBytes);
-            int available = Math.Min(recorded - played, _targetBytes - _readPos);
-            if (available <= 0)
-            {
-                // nothing yet or finished; zero-fill playback buffer to avoid noise
-                if (stream == null || stream.IsInvalid) return;
+                int remaining = totalRecorded - totalPlayed;
+                int toPush = Math.Min(chunkSize, remaining);
+                
+                byte[] temp = pool.Rent(toPush);
                 try
                 {
-                    ZeroFillPlaybackBuffer(stream, additionalAmount);
+                    Buffer.BlockCopy(buffer, totalPlayed, temp, 0, toPush);
+                    SDL3Helper.PutAudioToStream(playbackStream, temp, toPush);
+                    totalPlayed += toPush;
                 }
-                catch { }
-                return;
-            }
-
-            int toCopy = Math.Min(additionalAmount, available);
-
-            int pos = _readPos;
-            int tail = _targetBytes - pos;
-
-            if (stream == null || stream.IsInvalid) return;
-
-            var poolOut = ArrayPool<byte>.Shared;
-            byte[] temp = poolOut.Rent(toCopy);
-            try
-            {
-                if (toCopy <= tail)
+                finally
                 {
-                    Buffer.BlockCopy(_buffer, pos, temp, 0, toCopy);
+                    pool.Return(temp);
                 }
-                else
-                {
-                    Buffer.BlockCopy(_buffer, pos, temp, 0, tail);
-                    Buffer.BlockCopy(_buffer, 0, temp, tail, toCopy - tail);
-                }
-
-                // send to native stream (helper will pin)
-                SDL3Helper.PutAudioToStream(stream, temp, toCopy);
-
-                int newPos = (pos + toCopy) % _targetBytes;
-                Volatile.Write(ref _readPos, newPos);
-                Interlocked.Add(ref _playedBytes, toCopy);
-
-                if (toCopy < additionalAmount)
-                {
-                    int remainder = additionalAmount - toCopy;
-                    byte[] zero = poolOut.Rent(remainder);
-                    try
-                    {
-                        Array.Clear(zero, 0, remainder);
-                        SDL3Helper.PutAudioToStream(stream, zero, remainder);
-                    }
-                    finally { try { poolOut.Return(zero); } catch { } }
-                }
+                
+                Thread.Sleep(45);
             }
-            finally
+
+            Console.WriteLine("Waiting for playback to complete...");
+            while (SDL3Helper.GetAudioStreamQueued(playbackStream) > 1024)
             {
-                try { poolOut.Return(temp); } catch { }
+                Thread.Sleep(50);
             }
-        }
+            Thread.Sleep(500);
 
-        private static void ZeroFillPlaybackBuffer(SDL3AudioStreamSafeHandle? stream, int length)
-        {
-            if (length <= 0) return;
-            var pool = ArrayPool<byte>.Shared;
-            byte[] zero = pool.Rent(length);
-            try
-            {
-                Array.Clear(zero, 0, length);
-                SDL3Helper.PutAudioToStream(stream, zero, length);
-            }
-            finally
-            {
-                try { pool.Return(zero); } catch { }
-            }
+            var playbackDuration = (DateTime.UtcNow - playbackStartTime).TotalSeconds;
+            Console.WriteLine($"Finished playback. Duration: {playbackDuration:F2} seconds");
+
+            SDL_DestroyAudioStream(recStreamPtr);
+            SDL_CloseAudioDevice(recDeviceId);
+            try { SDL3Helper.DestroyAudioStream(playbackStream); } catch { }
+
+            SDL_Quit();
         }
     }
 }
