@@ -9,7 +9,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <PackageId>SIPSorceryMedia.SDL3</PackageId>
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <Authors>Christophe Irles, Sjofn LLC</Authors>
     <Description>
 		This project is an example of developing a C# library that can use features from [SDL3](https://www.libsdl.org/index.php) native libraries and that integrates with the [SIPSorcery](https://github.com/sipsorcery-org/sipsorcery) real-time communications library.
