@@ -160,10 +160,13 @@ namespace SIPSorceryMedia.SDL3
                 if (_useStreamCallbackReading)
                 {
                     if (_callbackTask == null || _callbackTask.IsCompleted)
-                    {
-                        _callbackCts = new CancellationTokenSource();
-                        _callbackTask = Task.Run(() => CallbackWorkerLoopAsync(_callbackCts.Token), ct);
-                    }
+                        {
+                            var oldCallbackCts = _callbackCts;
+                            _callbackCts = new CancellationTokenSource();
+                            try { oldCallbackCts?.Cancel(); } catch { }
+                            oldCallbackCts?.Dispose();
+                            _callbackTask = Task.Run(() => CallbackWorkerLoopAsync(_callbackCts.Token), ct);
+                        }
 
                     try { await Task.Delay(16, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
                     continue;
@@ -465,7 +468,10 @@ namespace SIPSorceryMedia.SDL3
             {
                 if (_mainTask == null || _mainTask.IsCompleted)
                 {
+                    var oldCts = _mainCts;
                     _mainCts = new CancellationTokenSource();
+                    try { oldCts?.Cancel(); } catch { }
+                    oldCts?.Dispose();
                     _mainTask = Task.Run(() => MainLoopAsync(_mainCts.Token));
                 }
 
@@ -545,7 +551,9 @@ namespace SIPSorceryMedia.SDL3
                     _ = CloseAudio();
 
                     _callbackCts?.Dispose();
+                    _callbackCts = null;
                     _mainCts?.Dispose();
+                    _mainCts = null;
 
                     // complete channel and return any queued buffers
                     _callbackChannel.Writer.Complete();
