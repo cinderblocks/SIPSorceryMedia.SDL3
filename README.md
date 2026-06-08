@@ -38,14 +38,12 @@ dotnet add package SIPSorceryMedia.SDL3.Native
 | `win-x64` | `SDL3.dll` |
 | `win-x86` | `SDL3.dll` |
 | `win-arm64` | `SDL3.dll` |
-| `macos-x64` | `libSDL3.dylib` |
+| `macos-x64` | `libSDL3.dylib` (universal fat binary) |
+| `macos-arm64` | `libSDL3.dylib` (universal fat binary) |
+
+The macOS binaries are universal (arm64 + x86_64) fat binaries sourced from the official SDL3 xcframework, so the same file covers both Intel and Apple Silicon regardless of which RID resolves at runtime.
 
 For platforms not covered by the native package, install SDL3 manually:
-
-**macOS (arm64 / universal)**
-```sh
-brew install sdl3
-```
 
 **Linux**
 ```sh
