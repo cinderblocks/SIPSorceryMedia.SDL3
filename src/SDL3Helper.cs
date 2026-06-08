@@ -463,12 +463,5 @@ namespace SIPSorceryMedia.SDL3
             }
         }
 
-        /// <summary>
-        /// Convenience wrapper that pins the buffer and forwards to PutAudioToStream.
-        /// </summary>
-        public static bool PutAudioPinned(SDL3AudioStreamSafeHandle? streamHandle, byte[] data, int len)
-        {
-            return PutAudioToStream(streamHandle, data, len);
-        }
     }
 }

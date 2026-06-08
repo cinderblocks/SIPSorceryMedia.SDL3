@@ -115,7 +115,7 @@ namespace SIPSorceryMedia.SDL3
             }
             else
             {
-                var device = SDL3Helper.GetAudioPlaybackDevice(audioInDeviceName!);
+                var device = SDL3Helper.GetAudioRecordingDevice(audioInDeviceName!);
                 if (!device.HasValue)
                 {
                     throw new ApplicationException($"Could not get audio device named '{audioInDeviceName}'");

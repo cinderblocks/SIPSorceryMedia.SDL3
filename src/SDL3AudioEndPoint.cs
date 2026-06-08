@@ -262,9 +262,6 @@ namespace SIPSorceryMedia.SDL3
         private void PlaybackWorker_DoWork(object? sender, DoWorkEventArgs e)
         {
             var pool = ArrayPool<byte>.Shared;
-            
-            // Pre-allocate a working buffer to reduce allocations
-            byte[]? workBuffer = null;
 
             while (!_playbackWorker.CancellationPending && !_disposed)
             {
@@ -310,7 +307,7 @@ namespace SIPSorceryMedia.SDL3
                     try
                     {
                         // Fast path: use buffer directly if size is reasonable
-                        SDL3Helper.PutAudioPinned(currentHandle, seg.Buffer, seg.Length);
+                        SDL3Helper.PutAudioToStream(currentHandle, seg.Buffer, seg.Length);
                     }
                     catch (Exception ex)
                     {
@@ -322,12 +319,6 @@ namespace SIPSorceryMedia.SDL3
                         try { pool.Return(seg.Buffer); } catch { }
                     }
                 }
-            }
-            
-            // Cleanup
-            if (workBuffer != null)
-            {
-                try { pool.Return(workBuffer); } catch { }
             }
         }
 
