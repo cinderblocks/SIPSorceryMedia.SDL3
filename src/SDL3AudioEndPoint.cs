@@ -1,6 +1,6 @@
-﻿/**
+/**
  * @file SDLAudioEndpoint.cs
- * @brief Example of an AudioEndpoint using SDL3 to playback audio stream
+ * @brief AudioEndpoint using SDL3 to playback an audio stream
  *
  * Copyright 2021, Christophe Irles.
  * Copyright 2025, Sjofn LLC.
@@ -19,7 +19,7 @@
  *    contributors may be used to endorse or promote products derived from this
  *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
@@ -36,18 +36,17 @@ using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using System;
 using System.Runtime.InteropServices;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Buffers;
-using System.ComponentModel;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace SIPSorceryMedia.SDL3
 {
     /// <summary>
-    /// Performance statistics for audio sink.
+    /// Performance statistics for the audio sink.
     /// </summary>
     public struct AudioSinkStats
     {
@@ -59,10 +58,8 @@ namespace SIPSorceryMedia.SDL3
 
     public class SDL3AudioEndPoint : IAudioSink, IDisposable
     {
-        private const int MAX_AUDIO_RENT = 1024 * 1024; // 1MB
-        // Optimal buffer size for low-latency voice: ~20ms at 48kHz stereo = 3840 bytes
-        private const int OPTIMAL_BUFFER_SIZE = 3840;
-        // Queue capacity to prevent unbounded growth (max ~200ms of audio)
+        private const int MAX_AUDIO_RENT = 1024 * 1024; // 1 MB
+        // Max ~200ms of audio buffered before dropping oldest
         private const int MAX_QUEUE_CAPACITY = 10;
 
         private readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioEndPoint>();
@@ -81,24 +78,22 @@ namespace SIPSorceryMedia.SDL3
 
         private bool _disposed = false;
 
-        public event SourceErrorDelegate ? OnAudioSinkError = null;
+        public event SourceErrorDelegate? OnAudioSinkError = null;
 
-        // Playback queue with bounded capacity
-        private readonly ConcurrentQueue<(byte[] Buffer, int Length)> _playbackQueue = new ConcurrentQueue<(byte[] Buffer, int Length)>();
-        private int _queueCount = 0; // Track queue depth for bounded capacity
-        private readonly SemaphoreSlim _playbackSemaphore = new SemaphoreSlim(0);
-        private readonly BackgroundWorker _playbackWorker;
+        // Bounded channel replaces the legacy BackgroundWorker + ConcurrentQueue + SemaphoreSlim trio.
+        // DropOldest keeps the sink caught up under load without unbounded queue growth.
+        private readonly Channel<(byte[] Buffer, int Length)> _playbackChannel;
+        private CancellationTokenSource? _playCts = null;
+        private Task? _playbackTask = null;
 
         // Stats for monitoring and diagnostics
         private long _underrunCount = 0;
         private long _droppedFrames = 0;
+        private int _channelCount = 0; // approximate depth for stats
 
         /// <summary>
-        /// Creates a new basic RTP session that captures and renders audio to/from the system devices.
+        /// Creates a new audio sink that plays decoded RTP audio through an SDL3 output device.
         /// </summary>
-        /// <param name="audioEncoder">An audio encoder that can be used to encode and decode
-        /// specific audio codecs.</param>
-        /// <param name="audioOutDeviceName">Name of the requested audio playback to use.</param>
         public SDL3AudioEndPoint(string audioOutDeviceName, IAudioEncoder audioEncoder)
         {
             _audioFormatManager = new MediaFormatManager<AudioFormat>(audioEncoder.SupportedFormats);
@@ -106,14 +101,16 @@ namespace SIPSorceryMedia.SDL3
 
             var device = SDL3Helper.GetAudioPlaybackDevice(audioOutDeviceName);
             if (!device.HasValue)
-            {
-                throw new ApplicationException($"Could not get audio recording device named {audioOutDeviceName}");
-            }
+                throw new ApplicationException($"Could not get audio playback device named '{audioOutDeviceName}'");
             _audioDevice = device.Value;
 
-            _playbackWorker = new BackgroundWorker();
-            _playbackWorker.DoWork += PlaybackWorker_DoWork;
-            _playbackWorker.WorkerSupportsCancellation = true;
+            _playbackChannel = Channel.CreateBounded<(byte[] Buffer, int Length)>(
+                new BoundedChannelOptions(MAX_QUEUE_CAPACITY)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
         }
 
         ~SDL3AudioEndPoint()
@@ -128,35 +125,22 @@ namespace SIPSorceryMedia.SDL3
         }
 
         /// <summary>
-        /// Called when an encoded audio frame has been received. The frame will be decoded
-        /// and queued for playback on the endpoint.
+        /// Called when an encoded audio frame has been received. Decodes and queues for playback.
         /// </summary>
-        /// <param name="encodedMediaFrame">The encoded audio frame to decode and play.</param>
         public void GotEncodedMediaFrame(EncodedAudioFrame encodedMediaFrame)
         {
             var audioFormat = encodedMediaFrame.AudioFormat;
-
             if (!audioFormat.IsEmpty())
             {
-                // Decode sample
                 var pcmSample = _audioEncoder.DecodeAudio(encodedMediaFrame.EncodedAudio, audioFormat);
-                // Convert short[] to byte[] efficiently
                 var pcmBytes = new byte[pcmSample.Length * sizeof(short)];
                 Buffer.BlockCopy(pcmSample, 0, pcmBytes, 0, pcmBytes.Length);
                 PutAudioSample(pcmBytes);
             }
         }
 
-        /// <summary>
-        /// Restrict the available audio formats for this endpoint using the provided filter.
-        /// </summary>
-        /// <param name="filter">A predicate used to select allowed audio formats.</param>
         public void RestrictFormats(Func<AudioFormat, bool> filter) => _audioFormatManager.RestrictFormats(filter);
 
-        /// <summary>
-        /// Sets the audio format to use for playback and initializes the playback device.
-        /// </summary>
-        /// <param name="audioFormat">The desired audio format.</param>
         public void SetAudioSinkFormat(AudioFormat audioFormat)
         {
             _audioFormatManager.SetSelectedFormat(audioFormat);
@@ -164,150 +148,110 @@ namespace SIPSorceryMedia.SDL3
             StartAudioSink();
         }
 
-        /// <summary>
-        /// Gets the list of available audio sink formats supported by the encoder.
-        /// /// </summary>
-        /// <returns>A list of supported audio formats.</returns>
         public List<AudioFormat> GetAudioSinkFormats() => _audioFormatManager.GetSourceFormats();
 
-        /// <summary>
-        /// Returns this endpoint wrapped in a <see cref="MediaEndPoints"/> instance.
-        /// </summary>
-        /// <returns>A <see cref="MediaEndPoints"/> containing this audio sink.</returns>
         public MediaEndPoints ToMediaEndPoints()
         {
-            return new MediaEndPoints
+            return new MediaEndPoints { AudioSink = this };
+        }
+
+        /// <summary>
+        /// Playback volume as a gain multiplier. 1.0 = unity gain, 0.0 = silent.
+        /// </summary>
+        public float Volume
+        {
+            get
             {
-                AudioSink = this,
-            };
+                SDL3AudioStreamSafeHandle? handle;
+                lock (_stateLock) { handle = _audioStream; }
+                return SDL3Helper.GetAudioStreamGain(handle);
+            }
+            set
+            {
+                SDL3AudioStreamSafeHandle? handle;
+                lock (_stateLock) { handle = _audioStream; }
+                SDL3Helper.SetAudioStreamGain(handle, Math.Max(0f, value));
+            }
         }
 
         private void InitPlaybackDevice()
         {
             try
             {
-                // Stop previous playback device (async close, don't block caller)
-                _ = CloseAudioSinkAsync();
+                // Close any existing stream before opening a new one.
+                // Grab and null the old handle under lock so Close can detect it.
+                SDL3AudioStreamSafeHandle? prev;
+                lock (_stateLock)
+                {
+                    prev = _audioStream;
+                    _audioStream = null;
+                    _isStarted = false;
+                    _isPaused = true;
+                    _isClosed = true;
+                }
+                if (prev != null)
+                {
+                    try { SDL3Helper.DestroyAudioStream(prev); } catch (Exception ex) { log.LogError(ex, "Error closing previous audio stream"); }
+                }
 
-                // Init Playback device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
 
-                // Use SafeHandle-based API
-                SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, FeedStreamCallback);
+                // Open without a callback — we push data from the worker task.
+                var newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, null);
 
                 lock (_stateLock)
                 {
-                    // replace previous handle using helper that unregisters callbacks and disposes
-                    var prev = _audioStream;
                     _audioStream = newHandle;
-                    if (prev != null)
-                    {
-                        try { SDL3Helper.DestroyAudioStream(prev); } catch { }
-                    }
-                 }
+                }
 
-                if(newHandle != null && !newHandle.IsInvalid)
-                    log.LogDebug("[InitPlaybackDevice] Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
+                if (newHandle != null && !newHandle.IsInvalid)
+                    log.LogDebug("[InitPlaybackDevice] Id:[{DeviceId}] Name:[{DeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
                 {
-                    log.LogError("[InitPlaybackDevice] SDLAudioEndPoint failed to initialise device. No audio device found - Id:[{AudioDeviceId} ] - DeviceName:[ {AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
-                    RaiseAudioSinkError($"SDLAudioEndPoint failed to initialise device. No audio device found - Id:[{_audioDevice.id} ] - DeviceName:[ {_audioDevice.name}]");
+                    log.LogError("[InitPlaybackDevice] Failed to open device Id:[{DeviceId}] Name:[{DeviceName}]", _audioDevice.id, _audioDevice.name);
+                    RaiseAudioSinkError($"SDL3AudioEndPoint failed to initialise device Id:[{_audioDevice.id}] Name:[{_audioDevice.name}]");
                 }
             }
             catch (Exception e)
             {
-                log.LogError(e, "[InitPlaybackDevice] SDLAudioEndPoint failed to initialise device - Id:[{AudioDeviceId}   ] - DeviceName:[   {AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
-                RaiseAudioSinkError($"SDLAudioEndPoint failed to initialise device. No audio device found - Id:[{_audioDevice.id}] - DeviceName:[{_audioDevice.name}] - Exception:[{e.Message}]");
+                log.LogError(e, "[InitPlaybackDevice] Exception opening device Id:[{DeviceId}] Name:[{DeviceName}]", _audioDevice.id, _audioDevice.name);
+                RaiseAudioSinkError($"SDL3AudioEndPoint failed to initialise device Id:[{_audioDevice.id}] Name:[{_audioDevice.name}]: {e.Message}");
             }
         }
 
-        private void FeedStreamCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
-        {
-            try
-            {
-                SDL3AudioStreamSafeHandle? currentHandle;
-                lock (_stateLock)
-                {
-                    currentHandle = _audioStream;
-                }
-
-                if (currentHandle == null || currentHandle.IsInvalid)
-                {
-                    return;
-                }
-
-                // Use SafeHandle overload to query queued data
-                int queued = SDL3Helper.GetAudioStreamQueued(currentHandle);
-                
-                // Log underruns for diagnostics
-                if (queued == 0 && additionalAmount > 0)
-                {
-                    Interlocked.Increment(ref _underrunCount);
-                    log.LogDebug("[FeedStreamCallback] Buffer underrun detected (count: {UnderrunCount})", _underrunCount);
-                }
-
-                // Signal worker that space is available (use TryRelease to avoid semaphore overflow)
-                if (additionalAmount > 0)
-                {
-                    try { _playbackSemaphore.Release(); } catch (SemaphoreFullException) { }
-                }
-            }
-            catch (Exception ex)
-            {
-                log.LogError(ex, "[FeedStreamCallback] Exception in audio stream callback");
-            }
-        }
-
-        private void PlaybackWorker_DoWork(object? sender, DoWorkEventArgs e)
+        private async Task PlaybackWorkerAsync(CancellationToken ct)
         {
             var pool = ArrayPool<byte>.Shared;
-
-            while (!_playbackWorker.CancellationPending && !_disposed)
+            try
             {
-                // Wait for available buffer space or timeout
-                if (!_playbackSemaphore.Wait(50))
+                await foreach (var (buf, len) in _playbackChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
                 {
-                    continue; // Timeout, check cancellation and retry
-                }
+                    Interlocked.Decrement(ref _channelCount);
 
-                SDL3AudioStreamSafeHandle? currentHandle;
-                lock (_stateLock)
-                {
-                    currentHandle = _audioStream;
-                }
-
-                if (currentHandle == null || currentHandle.IsInvalid)
-                {
-                    // Drain queue and return buffers on invalid handle
-                    while (_playbackQueue.TryDequeue(out var discarded))
+                    if (buf == null || len <= 0 || len > buf.Length)
                     {
-                        Interlocked.Decrement(ref _queueCount);
-                        try { pool.Return(discarded.Buffer); } catch { }
+                        if (buf != null) try { pool.Return(buf); } catch (Exception) { }
+                        continue;
                     }
-                    continue;
-                }
 
-                // Batch processing: dequeue and write multiple buffers if available
-                int processedCount = 0;
-                const int maxBatchSize = 3; // Process up to 3 buffers per iteration for efficiency
-                
-                while (processedCount < maxBatchSize && _playbackQueue.TryDequeue(out var seg))
-                {
-                    Interlocked.Decrement(ref _queueCount);
-                    processedCount++;
+                    SDL3AudioStreamSafeHandle? handle;
+                    lock (_stateLock) { handle = _audioStream; }
 
-                    // Validate segment
-                    if (seg.Buffer == null || seg.Length <= 0 || seg.Length > seg.Buffer.Length)
+                    if (handle == null || handle.IsInvalid)
                     {
-                        try { pool.Return(seg.Buffer); } catch (Exception) { }
+                        try { pool.Return(buf); } catch (Exception) { }
                         continue;
                     }
 
                     try
                     {
-                        // Fast path: use buffer directly if size is reasonable
-                        SDL3Helper.PutAudioToStream(currentHandle, seg.Buffer, seg.Length);
+                        // Check SDL queue depth to detect underruns
+                        int queued = SDL3Helper.GetAudioStreamQueued(handle);
+                        if (queued == 0)
+                            Interlocked.Increment(ref _underrunCount);
+
+                        SDL3Helper.PutAudioToStream(handle, buf, len);
                     }
                     catch (Exception ex)
                     {
@@ -315,112 +259,79 @@ namespace SIPSorceryMedia.SDL3
                     }
                     finally
                     {
-                        // Return buffer to pool
-                        try { pool.Return(seg.Buffer); } catch { }
+                        try { pool.Return(buf); } catch (Exception) { }
                     }
                 }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "PlaybackWorker: unexpected error");
             }
         }
 
         /// <summary>
-        /// Queues a raw PCM audio sample for playback.
+        /// Queues raw PCM bytes for playback. Oldest frames are dropped when the queue is full.
         /// </summary>
-        /// <param name="pcmSample">A buffer containing raw PCM audio bytes.</param>
         public void PutAudioSample(byte[] pcmSample)
         {
             if (pcmSample == null || pcmSample.Length == 0) return;
 
-            // Defensive protection against absurdly large samples
             if (pcmSample.Length > MAX_AUDIO_RENT)
             {
-                log.LogWarning("PutAudioSample: sample size {Size} exceeds maximum allowed {Max}, dropping", pcmSample.Length, MAX_AUDIO_RENT);
+                log.LogWarning("PutAudioSample: sample {Size} bytes exceeds {Max}, dropping", pcmSample.Length, MAX_AUDIO_RENT);
                 return;
             }
 
-            // Implement bounded queue: drop oldest frames if queue is full
-            int currentCount = Interlocked.CompareExchange(ref _queueCount, 0, 0);
-            if (currentCount >= MAX_QUEUE_CAPACITY)
-            {
-                // Queue full - drop oldest frame to make room
-                if (_playbackQueue.TryDequeue(out var oldest))
-                {
-                    Interlocked.Decrement(ref _queueCount);
-                    Interlocked.Increment(ref _droppedFrames);
-                    var pool = ArrayPool<byte>.Shared;
-                    try { pool.Return(oldest.Buffer); } catch { }
-                    log.LogDebug("PutAudioSample: queue full, dropped oldest frame (total dropped: {DroppedFrames})", _droppedFrames);
-                }
-            }
-
-            // Rent a buffer and copy data
-            var pool2 = ArrayPool<byte>.Shared;
-            var buf = pool2.Rent(pcmSample.Length);
-
-            // Copy using Buffer.BlockCopy for efficiency
+            var pool = ArrayPool<byte>.Shared;
+            var buf = pool.Rent(pcmSample.Length);
             Buffer.BlockCopy(pcmSample, 0, buf, 0, pcmSample.Length);
 
-            // Enqueue for playback worker
-            _playbackQueue.Enqueue((buf, pcmSample.Length));
-            Interlocked.Increment(ref _queueCount);
+            // Track before write so the counter is accurate when DropOldest fires
+            int depth = Interlocked.Increment(ref _channelCount);
+            if (depth > MAX_QUEUE_CAPACITY)
+                Interlocked.Increment(ref _droppedFrames);
 
-            // Signal worker (ignore overflow)
-            try { _playbackSemaphore.Release(); } catch (SemaphoreFullException) { }
+            if (!_playbackChannel.Writer.TryWrite((buf, pcmSample.Length)))
+            {
+                // Should not happen with DropOldest, but handle defensively
+                Interlocked.Decrement(ref _channelCount);
+                try { pool.Return(buf); } catch (Exception) { }
+            }
         }
 
-        [Obsolete("Use GotEncodeMediaFrame instead.")]
-        /// <summary>
-        /// Obsolete: Handle a received RTP audio payload. This method decodes the RTP
-        /// payload using the selected audio format and queues it for playback.
-        /// </summary>
-        /// <remarks>Use <see cref="GotEncodedMediaFrame(EncodedAudioFrame)"/> instead.</remarks>
+        [Obsolete("Use GotEncodedMediaFrame instead.")]
         public void GotAudioRtp(IPEndPoint remoteEndPoint, uint ssrc, uint seqnum, uint timestamp, int payloadID, bool marker, byte[] payload)
         {
             SDL3AudioStreamSafeHandle? currentHandle;
-            lock (_stateLock)
-            {
-                currentHandle = _audioStream;
-            }
+            lock (_stateLock) { currentHandle = _audioStream; }
+            if (currentHandle == null || currentHandle.IsInvalid) return;
 
-            if (currentHandle == null || currentHandle.IsInvalid) { return; }
-
-            // Decode sample
             var pcmSample = _audioEncoder.DecodeAudio(payload, _audioFormatManager.SelectedFormat);
             var pcmBytes = new byte[pcmSample.Length * sizeof(short)];
             Buffer.BlockCopy(pcmSample, 0, pcmBytes, 0, pcmBytes.Length);
             PutAudioSample(pcmBytes);
         }
 
-        /// <summary>
-        /// Gets diagnostic statistics about the audio endpoint performance.
-        /// </summary>
         public AudioSinkStats GetStats()
         {
+            bool isActive;
+            lock (_stateLock) { isActive = _isStarted && !_isPaused; }
             return new AudioSinkStats
             {
                 UnderrunCount = Interlocked.Read(ref _underrunCount),
                 DroppedFrames = Interlocked.Read(ref _droppedFrames),
-                QueueDepth = Interlocked.CompareExchange(ref _queueCount, 0, 0),
-                IsActive = _isStarted && !_isPaused
+                QueueDepth = Interlocked.CompareExchange(ref _channelCount, 0, 0),
+                IsActive = isActive
             };
         }
 
-        /// <summary>
-        /// Resets performance statistics.
-        /// </summary>
         public void ResetStats()
         {
             Interlocked.Exchange(ref _underrunCount, 0);
             Interlocked.Exchange(ref _droppedFrames, 0);
         }
 
-        /// <summary>
-        /// Pause audio sink operation.
-        /// </summary>
-        /// <remarks>
-        /// This synchronous API returns a completed Task. Prefer using the async counterpart
-        /// `PauseAudioSinkAsync` when calling from asynchronous code to avoid blocking or
-        /// surprising synchronous behavior.
-        /// </remarks>
         public Task PauseAudioSink()
         {
             SDL3AudioStreamSafeHandle? currentHandle = null;
@@ -436,27 +347,20 @@ namespace SIPSorceryMedia.SDL3
                 }
             }
 
-            if (doPause && currentHandle != null && !currentHandle.IsInvalid)
+            if (doPause)
             {
-                // stop worker
-                if (_playbackWorker.IsBusy)
-                    _playbackWorker.CancelAsync();
+                // Cancel the worker task
+                try { _playCts?.Cancel(); } catch (Exception) { }
 
-                SDL3Helper.PauseAudioStreamDevice(currentHandle);
-                log.LogDebug("[PauseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
+                if (currentHandle != null && !currentHandle.IsInvalid)
+                    SDL3Helper.PauseAudioStreamDevice(currentHandle);
+
+                log.LogDebug("[PauseAudioSink] Id:[{DeviceId}]", _audioDevice.id);
             }
 
             return Task.CompletedTask;
         }
 
-        /// <summary>
-        /// Resume audio sink operation.
-        /// </summary>
-        /// <remarks>
-        /// This synchronous API returns a completed Task. Prefer using the async counterpart
-        /// `ResumeAudioSinkAsync` when calling from asynchronous code to avoid blocking or
-        /// surprising synchronous behavior.
-        /// </remarks>
         public Task ResumeAudioSink()
         {
             SDL3AudioStreamSafeHandle? currentHandle = null;
@@ -474,35 +378,33 @@ namespace SIPSorceryMedia.SDL3
 
             if (doResume && currentHandle != null && !currentHandle.IsInvalid)
             {
-                if (!_playbackWorker.IsBusy)
-                    _playbackWorker.RunWorkerAsync();
-
+                StartPlaybackTask();
                 SDL3Helper.ResumeAudioStreamDevice(currentHandle);
-                log.LogDebug("[ResumeAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
+                log.LogDebug("[ResumeAudioSink] Id:[{DeviceId}]", _audioDevice.id);
             }
 
             return Task.CompletedTask;
         }
 
-        /// <summary>
-        /// Starts the audio sink. This synchronous wrapper forwards to <see cref="StartAudioSinkAsync"/>.
-        /// </summary>
-        /// <returns>A <see cref="Task"/> representing the start operation.</returns>
-        public Task StartAudioSink()
+        private void StartPlaybackTask()
         {
-            return StartAudioSinkAsync();
+            // Cancel any running task before starting a new one
+            var oldCts = _playCts;
+            _playCts = new CancellationTokenSource();
+            try { oldCts?.Cancel(); } catch (Exception) { }
+            oldCts?.Dispose();
+
+            _playbackTask = Task.Run(() => PlaybackWorkerAsync(_playCts.Token));
         }
 
-        /// <summary>
-        /// Asynchronously starts the audio sink and resumes playback if required.
-        /// </summary>
-        /// <returns>A <see cref="Task"/> that completes when the operation has been initiated.</returns>
+        public Task StartAudioSink() => StartAudioSinkAsync();
+
         public async Task StartAudioSinkAsync()
         {
             bool needResume = false;
             lock (_stateLock)
             {
-                if(!_isStarted && _audioStream != null && !_audioStream.IsInvalid)
+                if (!_isStarted && _audioStream != null && !_audioStream.IsInvalid)
                 {
                     _isStarted = true;
                     _isClosed = false;
@@ -512,32 +414,20 @@ namespace SIPSorceryMedia.SDL3
             }
 
             if (needResume)
-            {
-                // call resume outside lock
                 await ResumeAudioSink().ConfigureAwait(false);
-            }
         }
 
-        /// <summary>
-        /// Closes the audio sink. This synchronous wrapper forwards to <see cref="CloseAudioSinkAsync"/>.
-        /// </summary>
-        /// <returns>A <see cref="Task"/> representing the close operation.</returns>
-        public Task CloseAudioSink()
-        {
-            return CloseAudioSinkAsync();
-        }
+        public Task CloseAudioSink() => CloseAudioSinkAsync();
 
-        /// <summary>
-        /// Asynchronously closes the audio sink, disposes the underlying audio stream and clears queued buffers.
-        /// </summary>
-        /// <returns>A <see cref="Task"/> that completes when the sink has been closed.</returns>
         public async Task CloseAudioSinkAsync()
         {
-            // Ensure audio paused first
             await PauseAudioSink().ConfigureAwait(false);
+            CloseSync();
+        }
 
-            SDL3AudioStreamSafeHandle? toDispose = null;
-
+        private void CloseSync()
+        {
+            SDL3AudioStreamSafeHandle? toDispose;
             lock (_stateLock)
             {
                 toDispose = _audioStream;
@@ -552,7 +442,7 @@ namespace SIPSorceryMedia.SDL3
                 try
                 {
                     SDL3Helper.DestroyAudioStream(toDispose);
-                    log.LogDebug("[CloseAudioSink] Audio output - Id:[{AudioOutDeviceId}]", _audioDevice.id);
+                    log.LogDebug("[CloseAudioSink] Id:[{DeviceId}]", _audioDevice.id);
                 }
                 catch (Exception ex)
                 {
@@ -560,14 +450,13 @@ namespace SIPSorceryMedia.SDL3
                 }
             }
 
-            // clear any queued buffers
+            // Return any buffers still queued
             var pool = ArrayPool<byte>.Shared;
-            while (_playbackQueue.TryDequeue(out var seg))
+            while (_playbackChannel.Reader.TryRead(out var seg))
             {
+                Interlocked.Decrement(ref _channelCount);
                 try { pool.Return(seg.Buffer); } catch (Exception) { }
             }
-
-            return;
         }
 
         protected virtual void Dispose(bool disposing)
@@ -577,33 +466,21 @@ namespace SIPSorceryMedia.SDL3
 
             if (disposing)
             {
-                // dispose managed
-                try
-                {
-                    // Fire-and-forget close to avoid blocking Dispose
-                    _ = CloseAudioSinkAsync();
+                // Cancel worker first so it stops reading the channel
+                try { _playCts?.Cancel(); } catch (Exception) { }
 
-                    // dispose worker and semaphore
-                    if (_playbackWorker.IsBusy)
-                    {
-                        _playbackWorker.CancelAsync();
-                    }
-                    _playbackSemaphore?.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    log.LogError(ex, "Error during Dispose CloseAudioSink");
-                }
+                // Synchronous close: null the stream, return queued buffers
+                CloseSync();
+
+                // Complete the channel so ReadAllAsync terminates
+                _playbackChannel.Writer.TryComplete();
+
+                _playCts?.Dispose();
+                _playCts = null;
             }
-            else
-            {
-                // finalizer: nothing to do, SafeHandle will free the native resource
-            }
+            // Finalizer path: SafeHandle will free the native stream handle
         }
 
-        /// <summary>
-        /// Disposes the endpoint and releases managed resources.
-        /// </summary>
         public void Dispose()
         {
             Dispose(true);
@@ -611,4 +488,3 @@ namespace SIPSorceryMedia.SDL3
         }
     }
 }
-

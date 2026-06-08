@@ -1,112 +1,127 @@
-﻿using SIPSorceryMedia.Abstractions;
+using SIPSorcery.Media;
+using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.FFmpeg;
-using SIPSorceryMedia.SDL2;
+using SIPSorceryMedia.SDL3;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace OpusCodec
+namespace CheckCodec
 {
+    /// <summary>
+    /// PCMU/PCMA audio encoder that demonstrates the encode → decode roundtrip.
+    /// </summary>
+    internal class AudioEncoder : IAudioEncoder
+    {
+        public List<AudioFormat> SupportedFormats { get; } = new List<AudioFormat>
+        {
+            new AudioFormat(SDPWellKnownMediaFormatsEnum.PCMU),
+            new AudioFormat(SDPWellKnownMediaFormatsEnum.PCMA),
+        };
+
+        public byte[] EncodeAudio(short[] pcm, AudioFormat format)
+        {
+            return format.Codec switch
+            {
+                AudioCodecsEnum.PCMU => pcm.Select(s => MuLawEncoder.LinearToMuLawSample(s)).ToArray(),
+                AudioCodecsEnum.PCMA => pcm.Select(s => ALawEncoder.LinearToALawSample(s)).ToArray(),
+                _ => throw new NotSupportedException($"Codec {format.Codec} not supported by this encoder")
+            };
+        }
+
+        public short[] DecodeAudio(byte[] encoded, AudioFormat format)
+        {
+            return format.Codec switch
+            {
+                AudioCodecsEnum.PCMU => encoded.Select(b => MuLawDecoder.MuLawToLinearSample(b)).ToArray(),
+                AudioCodecsEnum.PCMA => encoded.Select(b => ALawDecoder.ALawToLinearSample(b)).ToArray(),
+                _ => throw new NotSupportedException($"Codec {format.Codec} not supported by this encoder")
+            };
+        }
+    }
+
     internal class ProgramCheckCodec
     {
-        // Path to FFmpeg library - TO DEFINE ACCORDING YOUR ENVIRONMENT
-        private const string FFMPEG_LIB_PATH = @"C:\ffmpeg-4.4.1-full_build-shared\bin";
+        // Path to FFmpeg library — update to match your environment
+        private const string FFMPEG_LIB_PATH = @"C:\ffmpeg\bin";
 
-        // Path to a valid file with Audio (can also be a video file)  - IT'S POSSIBLE TO DEFINE A REMOTE FILE OR A LOCAL FILE
-        //const String AUDIO_FILE_PATH = @"C:\media\file_example_WAV_5MG.wav";
-        //const String AUDIO_FILE_PATH =   @"C:\media\sample_960x400_ocean_with_audio.mp4";
-        //const String AUDIO_FILE_PATH = @"C:\media\file_example_WAV_5MG.wav";
-        //const String AUDIO_FILE_PATH = @"C:\media\media/max_intro.mp4";
-        const String AUDIO_FILE_PATH = @"https://upload.wikimedia.org/wikipedia/commons/0/0f/Pop_RockBrit_%28exploration%29-en_wave.wav";
-        //const String AUDIO_FILE_PATH = @"https://upload.wikimedia.org/wikipedia/commons/a/af/Armello_-_%27Horrors_%26_Heroes%27_Trailer.webm";
+        // Audio file to test (local or remote)
+        private const string AUDIO_FILE_PATH =
+            @"https://upload.wikimedia.org/wikipedia/commons/0/0f/Pop_RockBrit_%28exploration%29-en_wave.wav";
 
+        // 160 samples = 20ms at 8KHz (G.711 standard frame size)
+        private const int FRAME_SIZE = 160;
 
-        static SDL2AudioEndPoint audioEndPoint;
-        static IAudioSource audioSource;
+        static SDL3AudioEndPoint? audioEndPoint;
+        static IAudioSource? audioSource;
 
-        static OpusAudioEncoder audioEncoder = new OpusAudioEncoder(); // Create AudioEncoder
+        static readonly AudioEncoder audioEncoder = new AudioEncoder();
         static AudioFormat? audioFormat;
 
         static void Main(string[] args)
         {
-            int audioPlaybackDeviceIndex = 0; // To store the index of the audio playback device selected
-            String audioPlaybackDeviceName; // To store the name of the audio playback device selected
-
-            int audioRecordingDeviceIndex = 0; // To store the index of the audio recording device selected
-            String audioRecordingDeviceName; // To store the name of the audio recording device selected
-
             Console.Clear();
 
-            // Init SDL Library - Library files must be in the same folder than the application
-            Console.WriteLine("\nTry to init SDL2 libraries - they must be stored in the same folder than this application");
-            SDL2Helper.InitSDL();
-            Console.WriteLine("\nInit done");
-
+            Console.WriteLine("Initialising SDL3...");
+            SDL3Helper.InitSDL();
+            Console.WriteLine("SDL3 initialised.\n");
 
             var useRecordingDevice = UseRecordingDeviceOrAudioFile();
-            if(useRecordingDevice)
+
+            string? recordingDeviceName = null;
+            if (useRecordingDevice)
             {
-                // Select Recording Device
-                audioRecordingDeviceIndex = DeviceSelection(true);
-                if (audioRecordingDeviceIndex < 0)
+                recordingDeviceName = SelectDevice(isRecording: true);
+                if (recordingDeviceName == null)
                 {
-                    SDL2Helper.QuitSDL();
+                    SDL3Helper.QuitSDL();
                     return;
                 }
             }
 
-            // Select Playback Device
-            audioPlaybackDeviceIndex = DeviceSelection(false);
-            if (audioPlaybackDeviceIndex < 0)
+            string? playbackDeviceName = SelectDevice(isRecording: false);
+            if (playbackDeviceName == null)
             {
-                SDL2Helper.QuitSDL();
+                SDL3Helper.QuitSDL();
                 return;
             }
 
-            // Select Audio format
-            audioFormat = AudioFormatSelection();
+            audioFormat = SelectAudioFormat();
             if (audioFormat == null)
             {
-                SDL2Helper.QuitSDL();
+                SDL3Helper.QuitSDL();
                 return;
             }
 
-            audioRecordingDeviceName = GetDeviceName(audioRecordingDeviceIndex, true);
-            audioPlaybackDeviceName = GetDeviceName(audioPlaybackDeviceIndex, false);
+            Console.WriteLine(useRecordingDevice
+                ? $"\nAudio input:  [{recordingDeviceName}]"
+                : $"\nAudio input:  [{AUDIO_FILE_PATH}]");
+            Console.WriteLine($"Audio output: [{playbackDeviceName}]");
+            Console.WriteLine($"Codec:        [{audioFormat.Value.FormatName}]\n");
 
-            if (useRecordingDevice)
-                Console.WriteLine($"\nAudio Recording Device selected: [{audioRecordingDeviceName}]");
-            else
-                Console.WriteLine($"\nAudio file selected: [{AUDIO_FILE_PATH}]");
-            Console.WriteLine($"\nAduio Playback Device selected: [{audioPlaybackDeviceName}]");
-            
-            audioEndPoint = new SDL2AudioEndPoint(audioPlaybackDeviceName, audioEncoder);
+            audioEndPoint = new SDL3AudioEndPoint(playbackDeviceName, audioEncoder);
             audioEndPoint.SetAudioSinkFormat(audioFormat.Value);
             audioEndPoint.StartAudioSink();
 
-            int frameSize = audioEncoder.GetFrameSize();
-
             if (useRecordingDevice)
-                audioSource = new SDL2AudioSource(audioRecordingDeviceName, audioEncoder, (uint)frameSize);
+            {
+                audioSource = new SDL3AudioSource(recordingDeviceName!, audioEncoder, FRAME_SIZE);
+            }
             else
             {
-                // Initialise FFmpeg librairies
-                Console.WriteLine("\nTry to init FFmpeg libraries");
-                SIPSorceryMedia.FFmpeg.FFmpegInit.Initialise(FfmpegLogLevelEnum.AV_LOG_FATAL, FFMPEG_LIB_PATH);
-                Console.WriteLine("\nInit done");
+                Console.WriteLine("Initialising FFmpeg...");
+                FFmpegInit.Initialise(FfmpegLogLevelEnum.AV_LOG_FATAL, FFMPEG_LIB_PATH);
+                Console.WriteLine("FFmpeg initialised.\n");
 
-                audioSource = new SIPSorceryMedia.FFmpeg.FFmpegFileSource(AUDIO_FILE_PATH, true, audioEncoder, (uint)frameSize, false);
+                audioSource = new FFmpegFileSource(AUDIO_FILE_PATH, true, audioEncoder, FRAME_SIZE, false);
             }
 
-            audioSource.OnAudioSourceRawSample += AudioSource_OnAudioSourceRawSample;
             audioSource.OnAudioSourceEncodedSample += AudioSource_OnAudioSourceEncodedSample;
 
             audioSource.SetAudioSourceFormat(audioFormat.Value);
             audioSource.StartAudio();
 
-
-            Console.WriteLine("\nEncoding them Decoding Audio Input and Playback if to the Audio Output device");
-            Console.WriteLine("\nPress enter to quit");
+            Console.WriteLine("Encoding → decoding → playback. Press Q or Enter to quit.\n");
 
             for (var loop = true; loop;)
             {
@@ -116,154 +131,94 @@ namespace OpusCodec
                     case ConsoleKey.Q:
                     case ConsoleKey.Enter:
                     case ConsoleKey.Escape:
-                        Console.CursorVisible = true;
                         loop = false;
                         break;
                 }
             }
-            SDL2Helper.QuitSDL();
+
+            audioSource.CloseAudio();
+            audioEndPoint.CloseAudioSink();
+            SDL3Helper.QuitSDL();
         }
 
         private static void AudioSource_OnAudioSourceEncodedSample(uint durationRtpUnits, byte[] sample)
         {
-            // Decode sample
+            if (audioFormat == null || audioEndPoint == null) return;
+
             var pcmSample = audioEncoder.DecodeAudio(sample, audioFormat.Value);
-            byte[] pcmBytes = pcmSample.SelectMany(x => BitConverter.GetBytes(x)).ToArray();
-            audioEndPoint.GotAudioSample(pcmBytes);
+            var pcmBytes = new byte[pcmSample.Length * sizeof(short)];
+            Buffer.BlockCopy(pcmSample, 0, pcmBytes, 0, pcmBytes.Length);
+            audioEndPoint.PutAudioSample(pcmBytes);
         }
 
-        private static void AudioSource_OnAudioSourceRawSample(SIPSorceryMedia.Abstractions.AudioSamplingRatesEnum samplingRate, uint durationMilliseconds, short[] sample)
+        private static string? SelectDevice(bool isRecording)
         {
-            //byte[] pcmBytes = sample.SelectMany(x => BitConverter.GetBytes(x)).ToArray();
-            //audioEndPoint.GotAudioSample(pcmBytes);
-        }
+            string label = isRecording ? "recording" : "playback";
+            var devices = isRecording
+                ? SDL3Helper.GetAudioRecordingDevices()
+                : SDL3Helper.GetAudioPlaybackDevices();
 
-        static private String GetDeviceName(int index, bool recordingDevice)
-        {
-            if(recordingDevice)
-                return SIPSorceryMedia.SDL2.SDL2Helper.GetAudioRecordingDevice(index);
-            else
-                return SIPSorceryMedia.SDL2.SDL2Helper.GetAudioPlaybackDevice(index);
-        }
-
-        static private int DeviceSelection(bool recordingDevice)
-        {
-            string outputStr;
-            int deviceIndex = -1;
-
-            // Get list of Audio Playback devices
-            List<String> sdlDevices;
-
-            if (recordingDevice)
+            if (devices == null || devices.Count == 0)
             {
-                outputStr = "recording";
-                sdlDevices = SIPSorceryMedia.SDL2.SDL2Helper.GetAudioRecordingDevices();
-            }
-            else
-            {
-                outputStr = "playback";
-                sdlDevices = SIPSorceryMedia.SDL2.SDL2Helper.GetAudioPlaybackDevices();
+                Console.WriteLine($"No audio {label} devices found.");
+                return null;
             }
 
-            // Quit if no Audio devices found
-            if ((sdlDevices == null) || (sdlDevices.Count == 0))
-            {
-                Console.WriteLine($"No Audio {outputStr} devices found ...");
-                SDL2Helper.QuitSDL();
-                return -1;
-            }
+            var names = new List<string>(devices.Values);
 
-            // Allow end user to select Audio device
-            if (sdlDevices?.Count > 0)
-            {
-                while (true)
-                {
-                    Console.WriteLine($"\nSelect audio {outputStr} device:");
-                    int index = 1;
-                    foreach (String device in sdlDevices)
-                    {
-                        Console.Write($"\n [{index}] - {device} ");
-                        index++;
-                    }
-                    Console.WriteLine("\n");
-                    Console.Out.Flush();
-
-                    var keyConsole = Console.ReadKey();
-                    if (int.TryParse("" + keyConsole.KeyChar, out int keyValue) && keyValue < index && keyValue >= 0)
-                    {
-                        deviceIndex = keyValue;
-                        break;
-                    }
-                }
-            }
-            deviceIndex--;
-            return deviceIndex;
-        }
-
-        static private AudioFormat? AudioFormatSelection()
-        {
-            AudioFormat? result = null;
-            int audioFormatIndex = 0;
-
-            var audioFormatsSupported = audioEncoder.SupportedFormats;
-
-            if(audioFormatsSupported?.Count > 0)
-            {
-                if (audioFormatsSupported.Count == 1)
-                    result = audioFormatsSupported[0];
-                else
-                {
-                    while (true)
-                    {
-                        Console.WriteLine($"\nSelect audio format:");
-                        int index = 1;
-                        foreach (var audioFormat in audioFormatsSupported)
-                        {
-                            Console.Write($"\n [{index}] - {audioFormat.FormatName} ");
-                            index++;
-                        }
-                        Console.WriteLine("\n");
-                        Console.Out.Flush();
-
-                        var keyConsole = Console.ReadKey();
-                        if (int.TryParse("" + keyConsole.KeyChar, out int keyValue) && keyValue < index && keyValue >= 0)
-                        {
-                            audioFormatIndex = keyValue;
-                            break;
-                        }
-                    }
-
-                    if (audioFormatIndex != 0)
-                        result = audioFormatsSupported[audioFormatIndex - 1];
-                }
-            }
-            else
-                Console.WriteLine($"No Audio Format available ...");
-
-            return result;
-        }
-
-        static private Boolean UseRecordingDeviceOrAudioFile()
-        {
-            int deviceIndex = 0;
             while (true)
             {
-                Console.WriteLine($"\nDo you want to use Audio Recording Device or Audio file for Audio input ?");
-                Console.Write($"\n [1] - Use Audio Recording Device ");
-                Console.Write($"\n [2] - Use Audio file - Path:[{AUDIO_FILE_PATH}] ");
-                Console.WriteLine("\n");
-                Console.Out.Flush();
+                Console.WriteLine($"\nSelect audio {label} device:");
+                for (int i = 0; i < names.Count; i++)
+                    Console.WriteLine($"  [{i + 1}] {names[i]}");
+                Console.Write("> ");
 
-                var keyConsole = Console.ReadKey();
-                if (int.TryParse("" + keyConsole.KeyChar, out int keyValue) && keyValue < 3 && keyValue > 0)
-                {
-                    deviceIndex = keyValue;
-                    break;
-                }
+                var key = Console.ReadKey();
+                Console.WriteLine();
+                if (int.TryParse("" + key.KeyChar, out int choice) && choice >= 1 && choice <= names.Count)
+                    return names[choice - 1];
             }
-
-            return deviceIndex == 1;
         }
 
+        private static AudioFormat? SelectAudioFormat()
+        {
+            var formats = audioEncoder.SupportedFormats;
+            if (formats == null || formats.Count == 0)
+            {
+                Console.WriteLine("No audio formats available.");
+                return null;
+            }
+            if (formats.Count == 1)
+                return formats[0];
+
+            while (true)
+            {
+                Console.WriteLine("\nSelect audio format:");
+                for (int i = 0; i < formats.Count; i++)
+                    Console.WriteLine($"  [{i + 1}] {formats[i].FormatName}");
+                Console.Write("> ");
+
+                var key = Console.ReadKey();
+                Console.WriteLine();
+                if (int.TryParse("" + key.KeyChar, out int choice) && choice >= 1 && choice <= formats.Count)
+                    return formats[choice - 1];
+            }
+        }
+
+        private static bool UseRecordingDeviceOrAudioFile()
+        {
+            while (true)
+            {
+                Console.WriteLine("Audio input source:");
+                Console.WriteLine("  [1] Microphone (recording device)");
+                Console.WriteLine($"  [2] Audio file ({AUDIO_FILE_PATH})");
+                Console.Write("> ");
+
+                var key = Console.ReadKey();
+                Console.WriteLine();
+                if (key.KeyChar == '1') return true;
+                if (key.KeyChar == '2') return false;
+            }
+        }
     }
 }

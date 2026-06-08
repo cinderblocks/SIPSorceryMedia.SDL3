@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <Authors>Christophe Irles, Sjofn LLC</Authors>
+    <Copyright>Copyright © 2025-2026 Sjofn LLC</Copyright>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PackageLicenseExpression>Zlib</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/cinderblocks/SIPSorcery.SDL3</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>

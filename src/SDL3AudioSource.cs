@@ -1,6 +1,6 @@
-﻿/**
+/**
  * @file SDLAudioSource.cs
- * @brief Example of an AudioSource using SDL3 to playback audio stream
+ * @brief AudioSource using SDL3 to capture an audio stream
  *
  * Copyright 2021, Christophe Irles.
  * Copyright 2025, Sjofn LLC.
@@ -19,7 +19,7 @@
  *    contributors may be used to endorse or promote products derived from this
  *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
@@ -57,9 +57,9 @@ namespace SIPSorceryMedia.SDL3
     public class SDL3AudioSource : IAudioSource, IDisposable
     {
         private const int MAX_AUDIO_RENT = 1024 * 1024; // 1MB cap for rented buffers
-        // Channel capacity to prevent unbounded growth (max ~500ms of audio at typical frame rates)
+        // Channel capacity — max ~500ms of audio at typical frame rates
         private const int CHANNEL_CAPACITY = 25;
-        
+
         private static readonly ILogger log = SIPSorcery.LogFactory.CreateLogger<SDL3AudioSource>();
 
         private readonly (uint id, string name) _audioDevice;
@@ -86,7 +86,7 @@ namespace SIPSorceryMedia.SDL3
         // When true the SDL audio stream callback will provide data; main loop should not pull data.
         private volatile bool _useStreamCallbackReading = false;
 
-        // Bounded channel for callback data with better backpressure handling
+        // Bounded channel for callback data
         private readonly Channel<(byte[] Buffer, int Length)> _callbackChannel;
         private CancellationTokenSource? _callbackCts = null;
         private Task? _callbackTask = null;
@@ -97,10 +97,11 @@ namespace SIPSorceryMedia.SDL3
 
 #region EVENT
 
-        public event EncodedSampleDelegate OnAudioSourceEncodedSample = null;
-        public event RawAudioSampleDelegate OnAudioSourceRawSample = null;
-        public event SourceErrorDelegate OnAudioSourceError = null;
-        public event Action<EncodedAudioFrame> OnAudioSourceEncodedFrameReady = null;
+        // Events are null when no subscribers — this is standard .NET event contract.
+        public event EncodedSampleDelegate OnAudioSourceEncodedSample = null!;
+        public event RawAudioSampleDelegate OnAudioSourceRawSample = null!;
+        public event SourceErrorDelegate OnAudioSourceError = null!;
+        public event Action<EncodedAudioFrame> OnAudioSourceEncodedFrameReady = null!;
 
 #endregion EVENT
 
@@ -127,8 +128,7 @@ namespace SIPSorceryMedia.SDL3
             _audioEncoder = audioEncoder;
 
             this.frameSize = frameSize;
-            
-            // Use bounded channel with drop-oldest strategy for better performance
+
             _callbackChannel = Channel.CreateBounded<(byte[] Buffer, int Length)>(
                 new BoundedChannelOptions(CHANNEL_CAPACITY)
                 {
@@ -145,8 +145,7 @@ namespace SIPSorceryMedia.SDL3
 
         private void RaiseAudioSourceError(string err)
         {
-            // fire-and-forget close
-            _ = CloseAudioAsync();
+            CloseSync();
             OnAudioSourceError?.Invoke(err);
         }
 
@@ -160,13 +159,13 @@ namespace SIPSorceryMedia.SDL3
                 if (_useStreamCallbackReading)
                 {
                     if (_callbackTask == null || _callbackTask.IsCompleted)
-                        {
-                            var oldCallbackCts = _callbackCts;
-                            _callbackCts = new CancellationTokenSource();
-                            try { oldCallbackCts?.Cancel(); } catch { }
-                            oldCallbackCts?.Dispose();
-                            _callbackTask = Task.Run(() => CallbackWorkerLoopAsync(_callbackCts.Token), ct);
-                        }
+                    {
+                        var oldCallbackCts = _callbackCts;
+                        _callbackCts = new CancellationTokenSource();
+                        try { oldCallbackCts?.Cancel(); } catch (Exception) { }
+                        oldCallbackCts?.Dispose();
+                        _callbackTask = Task.Run(() => CallbackWorkerLoopAsync(_callbackCts.Token), ct);
+                    }
 
                     try { await Task.Delay(16, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
                     continue;
@@ -184,9 +183,7 @@ namespace SIPSorceryMedia.SDL3
 
                     if (currentHandle == null || currentHandle.IsInvalid)
                     {
-                        // fire-and-forget close
-                        _ = CloseAudioAsync();
-                        OnAudioSourceError?.Invoke($"SDLAudioSource [{_audioDevice.name}] stopped.");
+                        RaiseAudioSourceError($"SDLAudioSource [{_audioDevice.name}] stopped.");
                         return;
                     }
 
@@ -194,7 +191,6 @@ namespace SIPSorceryMedia.SDL3
                     try
                     {
                         currentHandle.DangerousAddRef(ref added);
-                        // For recording devices, use GetAudioStreamAvailable instead of GetAudioStreamQueued
                         size = SDL3Helper.GetAudioStreamAvailable(currentHandle);
                     }
                     finally
@@ -205,24 +201,11 @@ namespace SIPSorceryMedia.SDL3
                     if (size >= frameSize * 2)
                     {
                         var bufferSize = frameSize != 0 ? frameSize * 2 : size;
-
                         byte[] buf = pool.Rent(bufferSize);
 
                         try
                         {
-                            bool add2 = false;
-                            try
-                            {
-                                currentHandle.DangerousAddRef(ref add2);
-                                // Read directly into managed buffer using SafeHandle overload
-                                SDL3Helper.GetAudioStreamData(currentHandle, buf, bufferSize);
-                            }
-                            finally
-                            {
-                                if (add2) currentHandle.DangerousRelease();
-                            }
-
-                            // Fast path: process buffer inline instead of extra copy
+                            SDL3Helper.GetAudioStreamData(currentHandle, buf, bufferSize);
                             ProcessAudioBuffer(buf, bufferSize);
                         }
                         finally
@@ -242,45 +225,33 @@ namespace SIPSorceryMedia.SDL3
         {
             try
             {
-                // Stop previous recording device
-                _ = CloseAudioAsync();
+                CloseSync();
 
-                // Init recording device.
                 AudioFormat audioFormat = _audioFormatManager.SelectedFormat;
                 audioSamplingRates = audioFormat.ClockRate == AudioFormat.DEFAULT_CLOCK_RATE * 2
                     ? AudioSamplingRatesEnum.Rate16KHz : AudioSamplingRatesEnum.Rate8KHz;
 
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate);
-
-                // Use SafeHandle-based open
                 SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
 
-                 lock (_stateLock)
-                 {
-                     var prev = _audioStream;
-                     _audioStream = newHandle;
-                     if (prev != null)
-                     {
-                         try { SDL3Helper.DestroyAudioStream(prev); } catch { }
-                     }
-                 }
+                lock (_stateLock)
+                {
+                    _audioStream = newHandle;
+                }
 
-                 // when we open with UnqueueStreamCallback, indicate we will use callback reading
-                 _useStreamCallbackReading = newHandle != null && !newHandle.IsInvalid;
+                _useStreamCallbackReading = newHandle != null && !newHandle.IsInvalid;
 
                 if (newHandle != null && !newHandle.IsInvalid)
                     log.LogDebug("[InitRecordingDevice] Audio source - Id:[{AudioDeviceId}] - DeviceName:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
                 else
                 {
-                    log.LogError("[InitRecordingDevice] SDLAudioSource failed to initialise device. No audio device found with [{AudioDeviceId} ] and [ {AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
-                    _ = CloseAudioAsync();
-                    OnAudioSourceError?.Invoke($"SDLAudioSource failed to initialise device. No audio device found with [{_audioDevice.id} ] and [ {_audioDevice.name}]");
+                    log.LogError("[InitRecordingDevice] SDLAudioSource failed to initialise device. No audio device found with [{AudioDeviceId}] and [{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
+                    OnAudioSourceError?.Invoke($"SDLAudioSource failed to initialise device. No audio device found with [{_audioDevice.id}] and [{_audioDevice.name}]");
                 }
             }
             catch (Exception ex)
             {
-                log.LogError(ex, "InitRecordingDevice] SDLAudioSource failed to initialise device [{AudioDeviceId} ] - [ {AudioDeviceName}].", _audioDevice.id, _audioDevice.name);
-                _ = CloseAudioAsync();
+                log.LogError(ex, "[InitRecordingDevice] SDLAudioSource failed to initialise device [{AudioDeviceId}] - [{AudioDeviceName}].", _audioDevice.id, _audioDevice.name);
                 OnAudioSourceError?.Invoke($"SDLAudioSource failed to initialise device [{_audioDevice.name}] and [{_audioDevice.id}] - Exception:[{ex.Message}]");
             }
         }
@@ -288,27 +259,18 @@ namespace SIPSorceryMedia.SDL3
         private void UnqueueStreamCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additionalAmount, int totalAmount)
         {
             if (stream == null || stream.IsInvalid || additionalAmount <= 0)
-            {
                 return;
-            }
 
             var pool = ArrayPool<byte>.Shared;
-            int toRead = additionalAmount;
-            
-            // Defensive cap to avoid abusive sizes causing huge rents
-            if (toRead <= 0) return;
-            if (toRead > MAX_AUDIO_RENT) toRead = MAX_AUDIO_RENT;
-            
-            byte[] rented = pool.Rent(toRead);
+            int toRead = additionalAmount > MAX_AUDIO_RENT ? MAX_AUDIO_RENT : additionalAmount;
 
+            byte[] rented = pool.Rent(toRead);
             int read = 0;
             try
             {
-                // Ensure stream and rented are kept alive while native call occurs
                 GC.KeepAlive(stream);
                 read = SDL3Helper.GetAudioStreamData(stream, rented, toRead);
 
-                // Safety: clamp unexpected return values
                 if (read < 0) read = 0;
                 if (read > rented.Length) read = rented.Length;
 
@@ -318,24 +280,16 @@ namespace SIPSorceryMedia.SDL3
                     return;
                 }
 
-                var writer = _callbackChannel.Writer;
-                
-                // TryWrite with bounded channel will drop oldest if full (configured in channel options)
-                if (!writer.TryWrite((rented, read)))
+                if (!_callbackChannel.Writer.TryWrite((rented, read)))
                 {
-                    // This should not happen with DropOldest mode, but handle defensively
                     Interlocked.Increment(ref _droppedFrames);
                     pool.Return(rented);
-                    log.LogDebug("UnqueueStreamCallback: channel write failed, dropped frame (total: {DroppedFrames})", _droppedFrames);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 log.LogError(ex, "UnqueueStreamCallback: error reading audio stream");
-                if (rented != null)
-                {
-                    pool.Return(rented);
-                }
+                try { pool.Return(rented); } catch (Exception) { }
             }
         }
 
@@ -348,19 +302,18 @@ namespace SIPSorceryMedia.SDL3
             {
                 while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
                 {
-                    // Batch processing: read multiple buffers if available for efficiency
+                    // Batch up to 5 buffers per iteration for efficiency
                     int processedCount = 0;
                     const int maxBatchSize = 5;
-                    
+
                     while (processedCount < maxBatchSize && reader.TryRead(out var seg))
                     {
                         processedCount++;
-                        
                         try
                         {
                             ProcessAudioBuffer(seg.Buffer, seg.Length);
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                         {
                             log.LogError(ex, "Error processing queued audio buffer");
                         }
@@ -372,49 +325,79 @@ namespace SIPSorceryMedia.SDL3
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 log.LogError(ex, "CallbackWorkerLoopAsync unexpected error");
             }
         }
 
-        // Extracted processing logic to reduce duplication
         private void ProcessAudioBuffer(byte[] buffer, int length)
         {
             int shortCount = length / sizeof(short);
-            short[] pcm = new short[shortCount];
-            Buffer.BlockCopy(buffer, 0, pcm, 0, shortCount * sizeof(short));
-
-            OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)pcm.Length, pcm);
-
-            if (OnAudioSourceEncodedSample != null)
+            // ArrayPool<short> — subscribers must not retain the array reference past the event handler return
+            var pool = ArrayPool<short>.Shared;
+            var pcm = pool.Rent(shortCount);
+            try
             {
-                var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
-                if (encodedSample.Length > 0)
-                    OnAudioSourceEncodedSample?.Invoke((uint)(pcm.Length * _audioFormatManager.SelectedFormat.RtpClockRate / _audioFormatManager.SelectedFormat.ClockRate), encodedSample);
+                Buffer.BlockCopy(buffer, 0, pcm, 0, shortCount * sizeof(short));
+
+                OnAudioSourceRawSample?.Invoke(audioSamplingRates, (uint)shortCount, pcm);
+
+                if (OnAudioSourceEncodedSample != null || OnAudioSourceEncodedFrameReady != null)
+                {
+                    var encodedSample = _audioEncoder.EncodeAudio(pcm, _audioFormatManager.SelectedFormat);
+                    if (encodedSample.Length > 0)
+                    {
+                        var fmt = _audioFormatManager.SelectedFormat;
+                        uint durationRtp = (uint)(shortCount * fmt.RtpClockRate / fmt.ClockRate);
+                        uint durationMs  = (uint)(shortCount * 1000 / fmt.ClockRate);
+
+                        OnAudioSourceEncodedSample?.Invoke(durationRtp, encodedSample);
+                        OnAudioSourceEncodedFrameReady?.Invoke(new EncodedAudioFrame(0, fmt, durationMs, encodedSample));
+                    }
+                }
+            }
+            finally
+            {
+                pool.Return(pcm);
             }
         }
 
-        /// <summary>
-        /// Gets diagnostic statistics about the audio source performance.
-        /// </summary>
         public AudioSourceStats GetStats()
         {
+            bool isActive;
+            lock (_stateLock) { isActive = _isStarted && !_isPaused; }
             return new AudioSourceStats
             {
                 OverrunCount = Interlocked.Read(ref _overrunCount),
                 DroppedFrames = Interlocked.Read(ref _droppedFrames),
-                IsActive = _isStarted && !_isPaused
+                IsActive = isActive
             };
         }
 
-        /// <summary>
-        /// Resets performance statistics.
-        /// </summary>
         public void ResetStats()
         {
             Interlocked.Exchange(ref _overrunCount, 0);
             Interlocked.Exchange(ref _droppedFrames, 0);
+        }
+
+        /// <summary>
+        /// Capture volume as a gain multiplier. 1.0 = unity gain, 0.0 = silent.
+        /// </summary>
+        public float Volume
+        {
+            get
+            {
+                SDL3AudioStreamSafeHandle? handle;
+                lock (_stateLock) { handle = _audioStream; }
+                return SDL3Helper.GetAudioStreamGain(handle);
+            }
+            set
+            {
+                SDL3AudioStreamSafeHandle? handle;
+                lock (_stateLock) { handle = _audioStream; }
+                SDL3Helper.SetAudioStreamGain(handle, Math.Max(0f, value));
+            }
         }
 
         public Task PauseAudio()
@@ -434,9 +417,7 @@ namespace SIPSorceryMedia.SDL3
 
             if (doPause && currentHandle != null && !currentHandle.IsInvalid)
             {
-                // cancel main loop
-                _mainCts?.Cancel();
-
+                try { _mainCts?.Cancel(); } catch (Exception) { }
                 SDL3Helper.PauseAudioStreamDevice(currentHandle);
                 log.LogDebug("[PauseAudio] Audio source - Id:[{AudioInDeviceId}]", _audioDevice.id);
             }
@@ -470,7 +451,7 @@ namespace SIPSorceryMedia.SDL3
                 {
                     var oldCts = _mainCts;
                     _mainCts = new CancellationTokenSource();
-                    try { oldCts?.Cancel(); } catch { }
+                    try { oldCts?.Cancel(); } catch (Exception) { }
                     oldCts?.Dispose();
                     _mainTask = Task.Run(() => MainLoopAsync(_mainCts.Token));
                 }
@@ -482,55 +463,60 @@ namespace SIPSorceryMedia.SDL3
             return Task.CompletedTask;
         }
 
-        public Task StartAudio()
-        {
-            return StartAudioAsync();
-        }
+        public Task StartAudio() => StartAudioAsync();
 
         public async Task StartAudioAsync()
         {
-            if (!_isStarted && _audioStream != null && !_audioStream.IsInvalid)
-            {
-                _isStarted = true;
-                _isPaused = true;
-
-                await ResumeAudio();
-            }
-        }
-
-        public Task CloseAudio()
-        {
-            return CloseAudioAsync();
-        }
-
-        public async Task CloseAudioAsync()
-        {
-            if (_isStarted)
-            {
-                await PauseAudio();
-                if (_audioStream != null && !_audioStream.IsInvalid)
-                {
-                    try
-                    {
-                        SDL3Helper.DestroyAudioStream(_audioStream);
-                        log.LogDebug("[CloseAudio] Audio source - Id:[{AudioInDeviceId}] - Name:[{AudioDeviceName}]", 
-                            _audioDevice.id, _audioDevice.name);
-                    }
-                    catch (Exception ex)
-                    {
-                        log.LogError(ex, "Error destroying audio stream");
-                    }
-                }
-            }
-
+            bool needResume = false;
             lock (_stateLock)
             {
-                _isStarted = false;
+                if (!_isStarted && _audioStream != null && !_audioStream.IsInvalid)
+                {
+                    _isStarted = true;
+                    _isPaused = true;
+                    needResume = true;
+                }
+            }
+            if (needResume)
+                await ResumeAudio().ConfigureAwait(false);
+        }
+
+        public Task CloseAudio() => CloseAudioAsync();
+
+        public Task CloseAudioAsync()
+        {
+            CloseSync();
+            return Task.CompletedTask;
+        }
+
+        private void CloseSync()
+        {
+            SDL3AudioStreamSafeHandle? toDestroy;
+            lock (_stateLock)
+            {
+                toDestroy = _audioStream;
                 _audioStream = null;
+                _isStarted = false;
+                _isPaused = true;
                 _useStreamCallbackReading = false;
             }
 
-            try { _mainCts?.Cancel(); } catch { }
+            try { _mainCts?.Cancel(); } catch (Exception) { }
+            try { _callbackCts?.Cancel(); } catch (Exception) { }
+
+            if (toDestroy != null && !toDestroy.IsInvalid)
+            {
+                try { SDL3Helper.PauseAudioStreamDevice(toDestroy); } catch (Exception) { }
+                try
+                {
+                    SDL3Helper.DestroyAudioStream(toDestroy);
+                    log.LogDebug("[CloseAudio] Audio source - Id:[{AudioInDeviceId}] - Name:[{AudioDeviceName}]", _audioDevice.id, _audioDevice.name);
+                }
+                catch (Exception ex)
+                {
+                    log.LogError(ex, "Error destroying audio stream");
+                }
+            }
         }
 
         protected virtual void Dispose(bool disposing)
@@ -540,37 +526,22 @@ namespace SIPSorceryMedia.SDL3
 
             if (disposing)
             {
-                // dispose managed
-                try
+                try { _mainCts?.Cancel(); } catch (Exception) { }
+                try { _callbackCts?.Cancel(); } catch (Exception) { }
+
+                CloseSync();
+
+                _callbackChannel.Writer.TryComplete();
+                var pool = ArrayPool<byte>.Shared;
+                while (_callbackChannel.Reader.TryRead(out var seg))
                 {
-                    // cancel main and callback tasks without blocking
-                    try { _mainCts?.Cancel(); } catch { }
-                    try { _callbackCts?.Cancel(); } catch { }
-
-                    // fire-and-forget close
-                    _ = CloseAudio();
-
-                    _callbackCts?.Dispose();
-                    _callbackCts = null;
-                    _mainCts?.Dispose();
-                    _mainCts = null;
-
-                    // complete channel and return any queued buffers
-                    _callbackChannel.Writer.Complete();
-                    var pool = ArrayPool<byte>.Shared;
-                    while (_callbackChannel.Reader.TryRead(out var seg))
-                    {
-                        try { pool.Return(seg.Buffer); } catch { }
-                    }
+                    try { pool.Return(seg.Buffer); } catch (Exception) { }
                 }
-                catch (Exception ex)
-                {
-                    log.LogError(ex, "Error during Dispose CloseAudio");
-                }
-            }
-            else
-            {
-                // finalizer: nothing - SafeHandle will free native resource when finalized
+
+                _callbackCts?.Dispose();
+                _callbackCts = null;
+                _mainCts?.Dispose();
+                _mainCts = null;
             }
         }
 
@@ -580,43 +551,40 @@ namespace SIPSorceryMedia.SDL3
             GC.SuppressFinalize(this);
         }
 
-        public List<AudioFormat> GetAudioSourceFormats()
-        {
-            return _audioFormatManager.GetSourceFormats();
-        }
+        public List<AudioFormat> GetAudioSourceFormats() => _audioFormatManager.GetSourceFormats();
 
         public void SetAudioSourceFormat(AudioFormat audioFormat)
         {
-            // Fire-and-forget async version to avoid blocking callers expecting synchronous API.
-            _ = SetAudioSourceFormatAsync(audioFormat);
-        }
-
-        public async Task SetAudioSourceFormatAsync(AudioFormat audioFormat)
-        {
-            log.LogDebug("Setting audio source format to {AudioFormatFormatId}:{AudioFormatFormatName} {AudioFormatClockRate}.", 
+            log.LogDebug("Setting audio source format to {AudioFormatFormatId}:{AudioFormatFormatName} {AudioFormatClockRate}.",
                 audioFormat.FormatID, audioFormat.FormatName, audioFormat.ClockRate);
             _audioFormatManager.SetSelectedFormat(audioFormat);
- 
-            InitRecordingDevice();
-            await StartAudio();
+            try
+            {
+                InitRecordingDevice();
+                StartAudio().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "SetAudioSourceFormat failed");
+                OnAudioSourceError?.Invoke($"SetAudioSourceFormat failed: {ex.Message}");
+            }
         }
 
-        public void RestrictFormats(Func<AudioFormat, bool> filter)
+        public void RestrictFormats(Func<AudioFormat, bool> filter) => _audioFormatManager.RestrictFormats(filter);
+
+        public void ExternalAudioSourceRawSample(AudioSamplingRatesEnum samplingRate, uint durationMilliseconds, short[] sample)
         {
-            _audioFormatManager.RestrictFormats(filter);
+            if (sample == null || sample.Length == 0) return;
+            var bytes = new byte[sample.Length * sizeof(short)];
+            Buffer.BlockCopy(sample, 0, bytes, 0, bytes.Length);
+            ProcessAudioBuffer(bytes, bytes.Length);
         }
-
-        public void ExternalAudioSourceRawSample(AudioSamplingRatesEnum samplingRate, uint durationMilliseconds, short[] sample) 
-            => throw new NotImplementedException();
 
         public bool HasEncodedAudioSubscribers() => OnAudioSourceEncodedSample != null;
 
         public bool IsAudioSourcePaused()
         {
-            lock (_stateLock)
-            {
-                return _isPaused;
-            }
+            lock (_stateLock) { return _isPaused; }
         }
     }
 }

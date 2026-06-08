@@ -3,7 +3,7 @@
     <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0;net9.0;net10.0</TargetFrameworks>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
-    <LangVersion>preview</LangVersion>
+    <LangVersion>latest</LangVersion>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
@@ -11,20 +11,18 @@
     <PackageId>SIPSorceryMedia.SDL3</PackageId>
     <Version>0.0.4</Version>
     <Authors>Christophe Irles, Sjofn LLC</Authors>
-    <Description>
-		This project is an example of developing a C# library that can use features from [SDL3](https://www.libsdl.org/index.php) native libraries and that integrates with the [SIPSorcery](https://github.com/sipsorcery-org/sipsorcery) real-time communications library.
-
-		The classes in this project provide Audio End Point and Audio Source features.
-
-		Audio Codecs supported by this library: PCMU (G711), PCMA (G711), G722, G729 and Opus
-	  </Description>
+    <Description>SDL3 audio integration for the SIPSorcery VoIP/WebRTC stack. Implements IAudioSink (SDL3AudioEndPoint) and IAudioSource (SDL3AudioSource) for low-latency audio playback and capture via SDL3 on Windows and macOS. Supports G.711 PCMU/PCMA, G.722, G.729, and Opus codecs.</Description>
     <PackageLicenseExpression>Zlib</PackageLicenseExpression>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>WebRTC;VoIP;SIPSorcery;Media;SDL3;Audio</PackageTags>
     <PackageProjectUrl>https://github.com/cinderblocks/SIPSorcery.SDL3</PackageProjectUrl>
     <RepositoryUrl>https://github.com/cinderblocks/SIPSorcery.SDL3</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SIPSorceryMedia.Abstractions" Version="8.0.14" />
   </ItemGroup>
