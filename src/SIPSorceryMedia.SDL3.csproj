@@ -26,10 +26,10 @@
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="SIPSorceryMedia.Abstractions" Version="8.0.12" />
+    <PackageReference Include="SIPSorceryMedia.Abstractions" Version="8.0.14" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' or '$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Memory" Version="4.6.3" />
-    <PackageReference Include="System.Threading.Channels" Version="10.0.0" />
+    <PackageReference Include="System.Threading.Channels" Version="10.0.8" />
   </ItemGroup>
 </Project>
