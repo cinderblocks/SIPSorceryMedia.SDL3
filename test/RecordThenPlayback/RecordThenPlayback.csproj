@@ -12,10 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SIPSorceryMedia.SDL3.Native" Version="3.2.28" />
-  </ItemGroup>
-	
-  <ItemGroup>
+    <ProjectReference Include="..\..\SIPSorceryMedia.SDL3.Native\SIPSorceryMedia.SDL3.Native.csproj" />
     <ProjectReference Include="..\..\src\SIPSorceryMedia.SDL3.csproj" />
   </ItemGroup>
 

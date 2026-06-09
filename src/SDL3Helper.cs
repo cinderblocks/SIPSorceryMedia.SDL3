@@ -57,8 +57,11 @@ namespace SIPSorceryMedia.SDL3
         // New managed callback that exposes SafeHandle instead of raw IntPtr
         public delegate void SDL_AudioStreamHandleCallback(IntPtr userdata, SDL3AudioStreamSafeHandle? stream, int additional_amount, int total_amount);
 
-        // Preferred SafeHandle-based API with SafeHandle-aware callback
-        public static SDL3AudioStreamSafeHandle? OpenAudioDeviceStreamHandle(uint deviceId, ref SDL_AudioSpec audioSpec, SDL_AudioStreamHandleCallback? callback)
+        // Preferred SafeHandle-based API with SafeHandle-aware callback.
+        // audioSpec is passed by value: SDL_OpenAudioDeviceStream writes the physical device
+        // format back to the spec pointer, so we use a local copy to prevent that write-back
+        // from clobbering the caller's variable (which would corrupt subsequent stream opens).
+        public static SDL3AudioStreamSafeHandle? OpenAudioDeviceStreamHandle(uint deviceId, SDL_AudioSpec audioSpec, SDL_AudioStreamHandleCallback? callback)
         {
             SDL_AudioStreamCallback? nativeCallback = null;
 
@@ -79,7 +82,7 @@ namespace SIPSorceryMedia.SDL3
                 };
             }
 
-            var ptr = SDL_OpenAudioDeviceStream(deviceId, ref audioSpec, nativeCallback, IntPtr.Zero);
+            var ptr = SDL_OpenAudioDeviceStream(deviceId, audioSpec, nativeCallback, IntPtr.Zero);
             if (ptr == IntPtr.Zero) return null;
 
             var safeHandle = new SDL3AudioStreamSafeHandle(ptr);

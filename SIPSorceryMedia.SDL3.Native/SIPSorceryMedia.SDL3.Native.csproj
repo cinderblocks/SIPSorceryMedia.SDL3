@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <None Include="LICENSE.txt" Pack="true" PackagePath="" />
+    <None Include="README.txt" Pack="true" PackagePath="" />
+    <!-- NuGet pack: all platforms in their correct runtime paths -->
     <None Include="runtimes\win-x64\native\SDL3.dll" Pack="true" PackagePath="runtimes/win-x64/native" />
     <None Include="runtimes\win-x86\native\SDL3.dll" Pack="true" PackagePath="runtimes/win-x86/native" />
     <None Include="runtimes\win-arm64\native\SDL3.dll" Pack="true" PackagePath="runtimes/win-arm64/native" />
@@ -20,7 +22,25 @@
     <None Include="runtimes\macos-arm64\native\libSDL3.dylib" Pack="true" PackagePath="runtimes/macos-arm64/native" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="README.txt" Pack="true" PackagePath="" />
+  <!-- ProjectReference consumers: copy the platform-appropriate native binary to the output root.
+       Pack="false" keeps these out of the NuGet package (the None items above handle packing). -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <Content Include="runtimes\win-x64\native\SDL3.dll"
+             Link="SDL3.dll" CopyToOutputDirectory="PreserveNewest" Pack="false"
+             Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'" />
+    <Content Include="runtimes\win-x86\native\SDL3.dll"
+             Link="SDL3.dll" CopyToOutputDirectory="PreserveNewest" Pack="false"
+             Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X86'" />
+    <Content Include="runtimes\win-arm64\native\SDL3.dll"
+             Link="SDL3.dll" CopyToOutputDirectory="PreserveNewest" Pack="false"
+             Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OS)' == 'Unix' And $([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))">
+    <Content Include="runtimes\macos-x64\native\libSDL3.dylib"
+             Link="libSDL3.dylib" CopyToOutputDirectory="PreserveNewest" Pack="false"
+             Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'" />
+    <Content Include="runtimes\macos-arm64\native\libSDL3.dylib"
+             Link="libSDL3.dylib" CopyToOutputDirectory="PreserveNewest" Pack="false"
+             Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'" />
   </ItemGroup>
 </Project>

@@ -139,7 +139,7 @@ namespace PlayAudioFile
 
         private static uint OpenAudioDevice(uint id)
         {
-            _streamHandle = SDL3Helper.OpenAudioDeviceStreamHandle(id, ref audio_spec, FeedAudioCallback);
+            _streamHandle = SDL3Helper.OpenAudioDeviceStreamHandle(id, audio_spec, FeedAudioCallback);
             if (_streamHandle != null && !_streamHandle.IsInvalid)
             {
                 /* Let the audio run */

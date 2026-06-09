@@ -198,7 +198,7 @@ namespace SIPSorceryMedia.SDL3
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate, 1);
 
                 // Open without a callback — we push data from the worker task.
-                var newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, null);
+                var newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, audioSpec, null);
 
                 lock (_stateLock)
                 {

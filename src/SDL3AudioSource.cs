@@ -232,7 +232,7 @@ namespace SIPSorceryMedia.SDL3
                     ? AudioSamplingRatesEnum.Rate16KHz : AudioSamplingRatesEnum.Rate8KHz;
 
                 var audioSpec = SDL3Helper.GetAudioSpec(audioFormat.ClockRate);
-                SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, ref audioSpec, UnqueueStreamCallback);
+                SDL3AudioStreamSafeHandle? newHandle = SDL3Helper.OpenAudioDeviceStreamHandle(_audioDevice.id, audioSpec, UnqueueStreamCallback);
 
                 lock (_stateLock)
                 {
