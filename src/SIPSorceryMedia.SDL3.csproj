@@ -9,7 +9,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <PackageId>SIPSorceryMedia.SDL3</PackageId>
-    <Version>0.0.4</Version>
+    <Version>0.1.0</Version>
     <Authors>Christophe Irles, Sjofn LLC</Authors>
     <Description>SDL3 audio integration for the SIPSorcery VoIP/WebRTC stack. Implements IAudioSink (SDL3AudioEndPoint) and IAudioSource (SDL3AudioSource) for low-latency audio playback and capture via SDL3 on Windows and macOS. Supports G.711 PCMU/PCMA, G.722, G.729, and Opus codecs.</Description>
     <PackageLicenseExpression>Zlib</PackageLicenseExpression>
