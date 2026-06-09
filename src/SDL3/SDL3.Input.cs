@@ -47,7 +47,8 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetSensors(out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetSensorNameForID(uint instance_id);
+    private static extern IntPtr SDL_GetSensorNameForID_native(uint instance_id);
+    public static string SDL_GetSensorNameForID(uint instance_id) => PtrToStringUtf8(SDL_GetSensorNameForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_SensorType SDL_GetSensorTypeForID(uint instance_id);
@@ -65,7 +66,8 @@ public static unsafe partial class SDL
     public static extern uint SDL_GetSensorProperties(IntPtr sensor);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetSensorName(IntPtr sensor);
+    private static extern IntPtr SDL_GetSensorName_native(IntPtr sensor);
+    public static string SDL_GetSensorName(IntPtr sensor) => PtrToStringUtf8(SDL_GetSensorName_native(sensor));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_SensorType SDL_GetSensorType(IntPtr sensor);
@@ -127,10 +129,12 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetJoysticks(out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetJoystickNameForID(uint instance_id);
+    private static extern IntPtr SDL_GetJoystickNameForID_native(uint instance_id);
+    public static string SDL_GetJoystickNameForID(uint instance_id) => PtrToStringUtf8(SDL_GetJoystickNameForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetJoystickPathForID(uint instance_id);
+    private static extern IntPtr SDL_GetJoystickPathForID_native(uint instance_id);
+    public static string SDL_GetJoystickPathForID(uint instance_id) => PtrToStringUtf8(SDL_GetJoystickPathForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int SDL_GetJoystickPlayerIndexForID(uint instance_id);
@@ -237,10 +241,12 @@ public static unsafe partial class SDL
     public static extern uint SDL_GetJoystickProperties(IntPtr joystick);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetJoystickName(IntPtr joystick);
+    private static extern IntPtr SDL_GetJoystickName_native(IntPtr joystick);
+    public static string SDL_GetJoystickName(IntPtr joystick) => PtrToStringUtf8(SDL_GetJoystickName_native(joystick));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetJoystickPath(IntPtr joystick);
+    private static extern IntPtr SDL_GetJoystickPath_native(IntPtr joystick);
+    public static string SDL_GetJoystickPath(IntPtr joystick) => PtrToStringUtf8(SDL_GetJoystickPath_native(joystick));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int SDL_GetJoystickPlayerIndex(IntPtr joystick);
@@ -264,7 +270,8 @@ public static unsafe partial class SDL
     public static extern ushort SDL_GetJoystickFirmwareVersion(IntPtr joystick);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetJoystickSerial(IntPtr joystick);
+    private static extern IntPtr SDL_GetJoystickSerial_native(IntPtr joystick);
+    public static string SDL_GetJoystickSerial(IntPtr joystick) => PtrToStringUtf8(SDL_GetJoystickSerial_native(joystick));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_JoystickType SDL_GetJoystickType(IntPtr joystick);
@@ -470,10 +477,12 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetGamepadMappings(out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadMappingForGUID(SDL_GUID guid);
+    private static extern IntPtr SDL_GetGamepadMappingForGUID_native(SDL_GUID guid);
+    public static string SDL_GetGamepadMappingForGUID(SDL_GUID guid) => PtrToStringUtf8AndFreeWithSDL(SDL_GetGamepadMappingForGUID_native(guid));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadMapping(IntPtr gamepad);
+    private static extern IntPtr SDL_GetGamepadMapping_native(IntPtr gamepad);
+    public static string SDL_GetGamepadMapping(IntPtr gamepad) => PtrToStringUtf8AndFreeWithSDL(SDL_GetGamepadMapping_native(gamepad));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_SetGamepadMapping(uint instance_id, string mapping);
@@ -488,10 +497,12 @@ public static unsafe partial class SDL
     public static extern SDLBool SDL_IsGamepad(uint instance_id);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadNameForID(uint instance_id);
+    private static extern IntPtr SDL_GetGamepadNameForID_native(uint instance_id);
+    public static string SDL_GetGamepadNameForID(uint instance_id) => PtrToStringUtf8(SDL_GetGamepadNameForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadPathForID(uint instance_id);
+    private static extern IntPtr SDL_GetGamepadPathForID_native(uint instance_id);
+    public static string SDL_GetGamepadPathForID(uint instance_id) => PtrToStringUtf8(SDL_GetGamepadPathForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int SDL_GetGamepadPlayerIndexForID(uint instance_id);
@@ -515,7 +526,8 @@ public static unsafe partial class SDL
     public static extern SDL_GamepadType SDL_GetRealGamepadTypeForID(uint instance_id);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadMappingForID(uint instance_id);
+    private static extern IntPtr SDL_GetGamepadMappingForID_native(uint instance_id);
+    public static string SDL_GetGamepadMappingForID(uint instance_id) => PtrToStringUtf8AndFreeWithSDL(SDL_GetGamepadMappingForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_OpenGamepad(uint instance_id);
@@ -533,10 +545,12 @@ public static unsafe partial class SDL
     public static extern uint SDL_GetGamepadID(IntPtr gamepad);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadName(IntPtr gamepad);
+    private static extern IntPtr SDL_GetGamepadName_native(IntPtr gamepad);
+    public static string SDL_GetGamepadName(IntPtr gamepad) => PtrToStringUtf8(SDL_GetGamepadName_native(gamepad));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadPath(IntPtr gamepad);
+    private static extern IntPtr SDL_GetGamepadPath_native(IntPtr gamepad);
+    public static string SDL_GetGamepadPath(IntPtr gamepad) => PtrToStringUtf8(SDL_GetGamepadPath_native(gamepad));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_GamepadType SDL_GetGamepadType(IntPtr gamepad);
@@ -563,7 +577,8 @@ public static unsafe partial class SDL
     public static extern ushort SDL_GetGamepadFirmwareVersion(IntPtr gamepad);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadSerial(IntPtr gamepad);
+    private static extern IntPtr SDL_GetGamepadSerial_native(IntPtr gamepad);
+    public static string SDL_GetGamepadSerial(IntPtr gamepad) => PtrToStringUtf8(SDL_GetGamepadSerial_native(gamepad));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern ulong SDL_GetGamepadSteamHandle(IntPtr gamepad);
@@ -602,13 +617,15 @@ public static unsafe partial class SDL
     public static extern SDL_GamepadType SDL_GetGamepadTypeFromString(string str);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadStringForType(SDL_GamepadType type);
+    private static extern IntPtr SDL_GetGamepadStringForType_native(SDL_GamepadType type);
+    public static string SDL_GetGamepadStringForType(SDL_GamepadType type) => PtrToStringUtf8(SDL_GetGamepadStringForType_native(type));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_GamepadAxis SDL_GetGamepadAxisFromString(string str);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadStringForAxis(SDL_GamepadAxis axis);
+    private static extern IntPtr SDL_GetGamepadStringForAxis_native(SDL_GamepadAxis axis);
+    public static string SDL_GetGamepadStringForAxis(SDL_GamepadAxis axis) => PtrToStringUtf8(SDL_GetGamepadStringForAxis_native(axis));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_GamepadHasAxis(IntPtr gamepad, SDL_GamepadAxis axis);
@@ -620,7 +637,8 @@ public static unsafe partial class SDL
     public static extern SDL_GamepadButton SDL_GetGamepadButtonFromString(string str);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadStringForButton(SDL_GamepadButton button);
+    private static extern IntPtr SDL_GetGamepadStringForButton_native(SDL_GamepadButton button);
+    public static string SDL_GetGamepadStringForButton(SDL_GamepadButton button) => PtrToStringUtf8(SDL_GetGamepadStringForButton_native(button));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_GamepadHasButton(IntPtr gamepad, SDL_GamepadButton button);
@@ -679,10 +697,12 @@ public static unsafe partial class SDL
     public static extern void SDL_CloseGamepad(IntPtr gamepad);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadAppleSFSymbolsNameForButton(IntPtr gamepad, SDL_GamepadButton button);
+    private static extern IntPtr SDL_GetGamepadAppleSFSymbolsNameForButton_native(IntPtr gamepad, SDL_GamepadButton button);
+    public static string SDL_GetGamepadAppleSFSymbolsNameForButton(IntPtr gamepad, SDL_GamepadButton button) => PtrToStringUtf8(SDL_GetGamepadAppleSFSymbolsNameForButton_native(gamepad, button));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGamepadAppleSFSymbolsNameForAxis(IntPtr gamepad, SDL_GamepadAxis axis);
+    private static extern IntPtr SDL_GetGamepadAppleSFSymbolsNameForAxis_native(IntPtr gamepad, SDL_GamepadAxis axis);
+    public static string SDL_GetGamepadAppleSFSymbolsNameForAxis(IntPtr gamepad, SDL_GamepadAxis axis) => PtrToStringUtf8(SDL_GetGamepadAppleSFSymbolsNameForAxis_native(gamepad, axis));
 
     public enum SDL_Scancode
     {
@@ -1233,7 +1253,8 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetKeyboards(out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetKeyboardNameForID(uint instance_id);
+    private static extern IntPtr SDL_GetKeyboardNameForID_native(uint instance_id);
+    public static string SDL_GetKeyboardNameForID(uint instance_id) => PtrToStringUtf8(SDL_GetKeyboardNameForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_GetKeyboardFocus();
@@ -1266,13 +1287,15 @@ public static unsafe partial class SDL
     public static extern SDLBool SDL_SetScancodeName(SDL_Scancode scancode, string name);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetScancodeName(SDL_Scancode scancode);
+    private static extern IntPtr SDL_GetScancodeName_native(SDL_Scancode scancode);
+    public static string SDL_GetScancodeName(SDL_Scancode scancode) => PtrToStringUtf8(SDL_GetScancodeName_native(scancode));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_Scancode SDL_GetScancodeFromName(string name);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetKeyName(uint key);
+    private static extern IntPtr SDL_GetKeyName_native(uint key);
+    public static string SDL_GetKeyName(uint key) => PtrToStringUtf8(SDL_GetKeyName_native(key));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint SDL_GetKeyFromName(string name);
@@ -1373,7 +1396,8 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetMice(out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetMouseNameForID(uint instance_id);
+    private static extern IntPtr SDL_GetMouseNameForID_native(uint instance_id);
+    public static string SDL_GetMouseNameForID(uint instance_id) => PtrToStringUtf8(SDL_GetMouseNameForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_GetMouseFocus();
@@ -1477,7 +1501,8 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetTouchDevices(out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetTouchDeviceName(ulong touchID);
+    private static extern IntPtr SDL_GetTouchDeviceName_native(ulong touchID);
+    public static string SDL_GetTouchDeviceName(ulong touchID) => PtrToStringUtf8(SDL_GetTouchDeviceName_native(touchID));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_TouchDeviceType SDL_GetTouchDeviceType(ulong touchID);

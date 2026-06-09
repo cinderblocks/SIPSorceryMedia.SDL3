@@ -219,8 +219,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_OutOfMemory();
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] 
-    public static extern string SDL_GetError();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetError_native();
+    public static string SDL_GetError() => PtrToStringUtf8(SDL_GetError_native());
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_ClearError();
@@ -282,7 +283,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_GetPointerProperty(uint props, string name, IntPtr default_value);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetStringProperty(uint props, string name, string default_value);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetStringProperty_native(uint props, string name, string default_value);
+    public static string SDL_GetStringProperty(uint props, string name, string default_value) => PtrToStringUtf8(SDL_GetStringProperty_native(props, name, default_value));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern long SDL_GetNumberProperty(uint props, string name, long default_value);
@@ -337,7 +340,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_CreateThreadWithPropertiesRuntime(uint props, IntPtr pfnBeginThread, IntPtr pfnEndThread);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetThreadName(IntPtr thread);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetThreadName_native(IntPtr thread);
+    public static string SDL_GetThreadName(IntPtr thread) => PtrToStringUtf8(SDL_GetThreadName_native(thread));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern ulong SDL_GetCurrentThreadID();
@@ -657,7 +662,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_SetClipboardText(string text);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetClipboardText();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetClipboardText_native();
+    public static string SDL_GetClipboardText() => PtrToStringUtf8AndFreeWithSDL(SDL_GetClipboardText_native());
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_HasClipboardText();
@@ -665,7 +672,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_SetPrimarySelectionText(string text);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetPrimarySelectionText();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetPrimarySelectionText_native();
+    public static string SDL_GetPrimarySelectionText() => PtrToStringUtf8AndFreeWithSDL(SDL_GetPrimarySelectionText_native());
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_HasPrimarySelectionText();
@@ -930,9 +939,13 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int SDL_GetNumVideoDrivers();
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetVideoDriver(int index);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetVideoDriver_native(int index);
+    public static string SDL_GetVideoDriver(int index) => PtrToStringUtf8(SDL_GetVideoDriver_native(index));
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetCurrentVideoDriver();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetCurrentVideoDriver_native();
+    public static string SDL_GetCurrentVideoDriver() => PtrToStringUtf8(SDL_GetCurrentVideoDriver_native());
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_SystemTheme SDL_GetSystemTheme();
@@ -946,7 +959,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint SDL_GetDisplayProperties(uint displayID);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetDisplayName(uint displayID);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetDisplayName_native(uint displayID);
+    public static string SDL_GetDisplayName(uint displayID) => PtrToStringUtf8(SDL_GetDisplayName_native(displayID));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_GetDisplayBounds(uint displayID, out SDL_Rect rect);
@@ -1044,7 +1059,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_SetWindowTitle(IntPtr window, string title);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetWindowTitle(IntPtr window);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetWindowTitle_native(IntPtr window);
+    public static string SDL_GetWindowTitle(IntPtr window) => PtrToStringUtf8(SDL_GetWindowTitle_native(window));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_SetWindowIcon(IntPtr window, IntPtr icon);
@@ -1350,9 +1367,13 @@ public static unsafe partial class SDL
 
     // /usr/local/include/SDL3/SDL_filesystem.h
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetBasePath();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetBasePath_native();
+    public static string SDL_GetBasePath() => PtrToStringUtf8AndFreeWithSDL(SDL_GetBasePath_native());
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetPrefPath(string org, string app);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetPrefPath_native(string org, string app);
+    public static string SDL_GetPrefPath(string org, string app) => PtrToStringUtf8AndFreeWithSDL(SDL_GetPrefPath_native(org, app));
 
     public enum SDL_Folder
     {
@@ -1370,7 +1391,9 @@ public static unsafe partial class SDL
         SDL_FOLDER_COUNT = 11,
     }
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetUserFolder(SDL_Folder folder);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetUserFolder_native(SDL_Folder folder);
+    public static string SDL_GetUserFolder(SDL_Folder folder) => PtrToStringUtf8AndFreeWithSDL(SDL_GetUserFolder_native(folder));
 
     public enum SDL_PathType
     {
@@ -1427,7 +1450,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_GlobDirectory(string path, string pattern, SDL_GlobFlags flags, out int count);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetCurrentDirectory();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetCurrentDirectory_native();
+    public static string SDL_GetCurrentDirectory() => PtrToStringUtf8AndFreeWithSDL(SDL_GetCurrentDirectory_native());
 
     // /usr/local/include/SDL3/SDL_haptic.h
 
@@ -1557,7 +1582,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_GetHaptics(out int count);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetHapticNameForID(uint instance_id);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetHapticNameForID_native(uint instance_id);
+    public static string SDL_GetHapticNameForID(uint instance_id) => PtrToStringUtf8(SDL_GetHapticNameForID_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_OpenHaptic(uint instance_id);
@@ -1568,7 +1595,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint SDL_GetHapticID(IntPtr haptic);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetHapticName(IntPtr haptic);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetHapticName_native(IntPtr haptic);
+    public static string SDL_GetHapticName(IntPtr haptic) => PtrToStringUtf8(SDL_GetHapticName_native(haptic));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_IsMouseHaptic();
@@ -2001,7 +2030,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern void SDL_ResetHints();
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetHint(string name);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetHint_native(string name);
+    public static string SDL_GetHint(string name) => PtrToStringUtf8(SDL_GetHint_native(name));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_GetHintBoolean(string name, SDLBool default_value);
@@ -2088,7 +2119,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_SetAppMetadataProperty(string name, string value);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetAppMetadataProperty(string name);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetAppMetadataProperty_native(string name);
+    public static string SDL_GetAppMetadataProperty(string name) => PtrToStringUtf8(SDL_GetAppMetadataProperty_native(name));
 
     // /usr/local/include/SDL3/SDL_loadso.h
 
@@ -2303,8 +2336,9 @@ public static unsafe partial class SDL
 
     // /usr/local/include/SDL3/SDL_platform.h
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] 
-    public static extern string SDL_GetPlatform();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetPlatform_native();
+    public static string SDL_GetPlatform() => PtrToStringUtf8(SDL_GetPlatform_native());
 
     // /usr/local/include/SDL3/SDL_process.h
 
@@ -2615,7 +2649,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern void SDL_SetTrayEntryLabel(IntPtr entry, string label);
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetTrayEntryLabel(IntPtr entry);
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetTrayEntryLabel_native(IntPtr entry);
+    public static string SDL_GetTrayEntryLabel(IntPtr entry) => PtrToStringUtf8(SDL_GetTrayEntryLabel_native(entry));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern void SDL_SetTrayEntryChecked(IntPtr entry, SDLBool check);
@@ -2652,7 +2688,9 @@ public static unsafe partial class SDL
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int SDL_GetVersion();
 
-    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)] public static extern string SDL_GetRevision();
+    [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetRevision_native();
+    public static string SDL_GetRevision() => PtrToStringUtf8(SDL_GetRevision_native());
 
     // /usr/local/include/SDL3/SDL_main.h
 

@@ -344,7 +344,8 @@ public static unsafe partial class SDL
     }
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetPixelFormatName(SDL_PixelFormat format);
+    private static extern IntPtr SDL_GetPixelFormatName_native(SDL_PixelFormat format);
+    public static string SDL_GetPixelFormatName(SDL_PixelFormat format) => PtrToStringUtf8(SDL_GetPixelFormatName_native(format));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_GetMasksForPixelFormat(SDL_PixelFormat format, out int bpp, out uint Rmask,
@@ -699,10 +700,12 @@ public static unsafe partial class SDL
     public static extern int SDL_GetNumCameraDrivers();
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetCameraDriver(int index);
+    private static extern IntPtr SDL_GetCameraDriver_native(int index);
+    public static string SDL_GetCameraDriver(int index) => PtrToStringUtf8(SDL_GetCameraDriver_native(index));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetCurrentCameraDriver();
+    private static extern IntPtr SDL_GetCurrentCameraDriver_native();
+    public static string SDL_GetCurrentCameraDriver() => PtrToStringUtf8(SDL_GetCurrentCameraDriver_native());
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr SDL_GetCameras(out int count);
@@ -717,7 +720,8 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetCameraSupportedFormats(uint devid, out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetCameraName(uint instance_id);
+    private static extern IntPtr SDL_GetCameraName_native(uint instance_id);
+    public static string SDL_GetCameraName(uint instance_id) => PtrToStringUtf8(SDL_GetCameraName_native(instance_id));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_CameraPosition SDL_GetCameraPosition(uint instance_id);

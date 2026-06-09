@@ -59,10 +59,17 @@ public static unsafe partial class SDL
     public static extern int SDL_GetNumAudioDrivers();
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetAudioDriver(int index);
+    private static extern IntPtr SDL_GetAudioDriver_native(int index);
+
+    // SDL returns a pointer to static storage — marshal without freeing.
+    public static string SDL_GetAudioDriver(int index) =>
+        PtrToStringUtf8(SDL_GetAudioDriver_native(index));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetCurrentAudioDriver();
+    private static extern IntPtr SDL_GetCurrentAudioDriver_native();
+
+    public static string SDL_GetCurrentAudioDriver() =>
+        PtrToStringUtf8(SDL_GetCurrentAudioDriver_native());
 
     [DllImport(nativeLibName, EntryPoint = "SDL_GetAudioPlaybackDevices", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr SDL_GetAudioPlaybackDevices_native(out int count);
@@ -111,7 +118,7 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetAudioDeviceChannelMap(uint devid, out int count);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern uint SDL_OpenAudioDevice(uint devid, ref SDL_AudioSpec spec);
+    public static extern uint SDL_OpenAudioDevice(uint devid, in SDL_AudioSpec spec);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_IsAudioDevicePhysical(uint devid);
@@ -153,7 +160,7 @@ public static unsafe partial class SDL
     public static extern uint SDL_GetAudioStreamDevice(IntPtr stream);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr SDL_CreateAudioStream(ref SDL_AudioSpec src_spec, ref SDL_AudioSpec dst_spec);
+    public static extern IntPtr SDL_CreateAudioStream(in SDL_AudioSpec src_spec, in SDL_AudioSpec dst_spec);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint SDL_GetAudioStreamProperties(IntPtr stream);
@@ -163,8 +170,8 @@ public static unsafe partial class SDL
         out SDL_AudioSpec dst_spec);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern SDLBool SDL_SetAudioStreamFormat(IntPtr stream, ref SDL_AudioSpec src_spec,
-        ref SDL_AudioSpec dst_spec);
+    public static extern SDLBool SDL_SetAudioStreamFormat(IntPtr stream, in SDL_AudioSpec src_spec,
+        in SDL_AudioSpec dst_spec);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern float SDL_GetAudioStreamFrequencyRatio(IntPtr stream);
@@ -251,7 +258,7 @@ public static unsafe partial class SDL
     public static extern void SDL_DestroyAudioStream(IntPtr stream);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr SDL_OpenAudioDeviceStream(uint devid, ref SDL_AudioSpec spec,
+    public static extern IntPtr SDL_OpenAudioDeviceStream(uint devid, in SDL_AudioSpec spec,
         SDL_AudioStreamCallback? callback, IntPtr userdata);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -273,11 +280,12 @@ public static unsafe partial class SDL
     public static extern SDLBool SDL_MixAudio(IntPtr dst, IntPtr src, SDL_AudioFormat format, uint len, float volume);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern SDLBool SDL_ConvertAudioSamples(ref SDL_AudioSpec src_spec, IntPtr src_data, int src_len,
-        ref SDL_AudioSpec dst_spec, IntPtr dst_data, out int dst_len);
+    public static extern SDLBool SDL_ConvertAudioSamples(in SDL_AudioSpec src_spec, IntPtr src_data, int src_len,
+        in SDL_AudioSpec dst_spec, out IntPtr dst_data, out int dst_len);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetAudioFormatName(SDL_AudioFormat format);
+    private static extern IntPtr SDL_GetAudioFormatName_native(SDL_AudioFormat format);
+    public static string SDL_GetAudioFormatName(SDL_AudioFormat format) => PtrToStringUtf8(SDL_GetAudioFormatName_native(format));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int SDL_GetSilenceValueForFormat(SDL_AudioFormat format);

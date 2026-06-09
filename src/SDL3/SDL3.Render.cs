@@ -168,7 +168,8 @@ public static unsafe partial class SDL
     public static extern int SDL_GetNumRenderDrivers();
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetRenderDriver(int index);
+    private static extern IntPtr SDL_GetRenderDriver_native(int index);
+    public static string SDL_GetRenderDriver(int index) => PtrToStringUtf8(SDL_GetRenderDriver_native(index));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDLBool SDL_CreateWindowAndRenderer(string title, int width, int height,
@@ -190,7 +191,8 @@ public static unsafe partial class SDL
     public static extern IntPtr SDL_GetRenderWindow(IntPtr renderer);
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetRendererName(IntPtr renderer);
+    private static extern IntPtr SDL_GetRendererName_native(IntPtr renderer);
+    public static string SDL_GetRendererName(IntPtr renderer) => PtrToStringUtf8(SDL_GetRendererName_native(renderer));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint SDL_GetRendererProperties(IntPtr renderer);

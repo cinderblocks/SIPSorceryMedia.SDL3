@@ -849,10 +849,12 @@ public static unsafe partial class SDL
     public static extern int SDL_GetNumGPUDrivers();
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGPUDriver(int index);
+    private static extern IntPtr SDL_GetGPUDriver_native(int index);
+    public static string SDL_GetGPUDriver(int index) => PtrToStringUtf8(SDL_GetGPUDriver_native(index));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern string SDL_GetGPUDeviceDriver(IntPtr device);
+    private static extern IntPtr SDL_GetGPUDeviceDriver_native(IntPtr device);
+    public static string SDL_GetGPUDeviceDriver(IntPtr device) => PtrToStringUtf8(SDL_GetGPUDeviceDriver_native(device));
 
     [DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern SDL_GPUShaderFormat SDL_GetGPUShaderFormats(IntPtr device);
